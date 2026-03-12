@@ -3,6 +3,7 @@ Thumbs.db
 
 .env
 .env.*
+!.env.example
 
 .venv/
 venv/

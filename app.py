@@ -9,8 +9,37 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-STATIC_DIR = Path(__file__).parent / "static"
+ROOT_DIR = Path(__file__).parent
+STATIC_DIR = ROOT_DIR / "static"
+ENV_FILE = ROOT_DIR / ".env"
 OPENAI_API_URL = "https://api.openai.com/v1/responses"
+
+
+def load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export ") :].strip()
+        value = value.strip()
+
+        if not key:
+            continue
+
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+
+        os.environ.setdefault(key, value)
+
+
+load_dotenv(ENV_FILE)
 DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4")
 
 
