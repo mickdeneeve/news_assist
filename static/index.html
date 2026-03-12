@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hello World</title>
+    <title>GPT-5.4 Demo</title>
     <style>
       :root {
         --bg-top: #f7efe2;
@@ -12,6 +12,7 @@
         --text: #182126;
         --accent: #0d6b66;
         --muted: #5e6b73;
+        --accent-strong: #0b4f4b;
         --shadow: rgba(24, 33, 38, 0.12);
       }
 
@@ -54,13 +55,13 @@
         color: var(--muted);
       }
 
-      .backend {
+      form {
         margin-top: 2rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid rgba(24, 33, 38, 0.1);
       }
 
+      label,
       .label {
+        display: block;
         margin: 0 0 0.5rem;
         font-size: 0.8rem;
         font-weight: 700;
@@ -69,42 +70,126 @@
         color: var(--accent);
       }
 
-      #backend-message {
+      textarea {
+        width: 100%;
+        min-height: 140px;
+        padding: 1rem 1.1rem;
+        border: 1px solid rgba(24, 33, 38, 0.16);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--text);
+        font: inherit;
+        resize: vertical;
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 1rem;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.85rem 1.4rem;
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+        color: white;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.7;
+      }
+
+      #status {
+        margin: 0;
+        font-size: 0.95rem;
+      }
+
+      .response {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid rgba(24, 33, 38, 0.1);
+      }
+
+      #response-text {
         margin: 0;
         font-size: 1.1rem;
         color: var(--text);
+        white-space: pre-wrap;
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>Hello World</h1>
-      <p>A minimal web page served by a Python backend.</p>
+      <h1>Ask GPT-5.4</h1>
+      <p>Type a prompt, send it to the Python backend, and show the model response here.</p>
 
-      <section class="backend" aria-live="polite">
-        <p class="label">Backend Response</p>
-        <p id="backend-message">Loading...</p>
+      <form id="chat-form">
+        <label for="query">Your Query</label>
+        <textarea id="query" name="query" placeholder="Write your prompt here..." required></textarea>
+
+        <div class="actions">
+          <button type="submit" id="send-button">Send</button>
+          <p id="status">Ready.</p>
+        </div>
+      </form>
+
+      <section class="response" aria-live="polite">
+        <p class="label">Response</p>
+        <p id="response-text">The model reply will appear here.</p>
       </section>
     </main>
 
     <script>
-      async function loadBackendMessage() {
-        const target = document.getElementById("backend-message");
+      const form = document.getElementById("chat-form");
+      const queryInput = document.getElementById("query");
+      const sendButton = document.getElementById("send-button");
+      const status = document.getElementById("status");
+      const responseText = document.getElementById("response-text");
+
+      async function submitQuery(event) {
+        event.preventDefault();
+
+        const query = queryInput.value.trim();
+        if (!query) {
+          status.textContent = "Enter a prompt first.";
+          return;
+        }
+
+        sendButton.disabled = true;
+        status.textContent = "Sending...";
+        responseText.textContent = "Waiting for the model response...";
 
         try {
-          const response = await fetch("/api/hello");
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query }),
+          });
 
           const payload = await response.json();
-          target.textContent = payload.message;
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          responseText.textContent = payload.response;
+          status.textContent = `Response received from ${payload.model}.`;
         } catch (error) {
-          target.textContent = `Backend request failed: ${error.message}`;
+          responseText.textContent = "The request failed.";
+          status.textContent = error.message;
+        } finally {
+          sendButton.disabled = false;
         }
       }
 
-      loadBackendMessage();
+      form.addEventListener("submit", submitQuery);
     </script>
   </body>
 </html>
