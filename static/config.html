@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configuration</title>
+    <style>
+      :root {
+        --bg-top: #f7efe2;
+        --bg-bottom: #d6ebe4;
+        --panel: rgba(255, 252, 247, 0.9);
+        --text: #182126;
+        --accent: #0d6b66;
+        --accent-strong: #0b4f4b;
+        --muted: #5e6b73;
+        --shadow: rgba(24, 33, 38, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.7), transparent 35%),
+          linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+        color: var(--text);
+        font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(92vw, 760px);
+        padding: 3rem;
+        border: 1px solid rgba(24, 33, 38, 0.08);
+        border-radius: 28px;
+        background: var(--panel);
+        box-shadow: 0 22px 44px -28px var(--shadow);
+        backdrop-filter: blur(14px);
+      }
+
+      .nav {
+        display: flex;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .nav a {
+        padding: 0.5rem 0.9rem;
+        border-radius: 999px;
+        color: var(--accent-strong);
+        text-decoration: none;
+        background: rgba(13, 107, 102, 0.1);
+        font-size: 0.92rem;
+        font-weight: 700;
+      }
+
+      .nav a.active {
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+        color: white;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.6rem, 10vw, 4.4rem);
+        line-height: 0.95;
+        letter-spacing: -0.08em;
+      }
+
+      p {
+        margin: 1rem 0 0;
+        font-size: 1.05rem;
+        color: var(--muted);
+      }
+
+      form {
+        margin-top: 2rem;
+        display: grid;
+        gap: 1.4rem;
+      }
+
+      .field {
+        padding: 1.2rem;
+        border: 1px solid rgba(24, 33, 38, 0.09);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      label {
+        display: block;
+        margin: 0 0 0.5rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      input {
+        width: 100%;
+        padding: 0.9rem 1rem;
+        border: 1px solid rgba(24, 33, 38, 0.16);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.78);
+        color: var(--text);
+        font: inherit;
+      }
+
+      .hint {
+        margin-top: 0.7rem;
+        font-size: 0.94rem;
+      }
+
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin-top: 1rem;
+        font-size: 0.95rem;
+        color: var(--text);
+      }
+
+      .checkbox input {
+        width: auto;
+        margin: 0;
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 0.5rem;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.85rem 1.4rem;
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+        color: white;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.7;
+      }
+
+      #status {
+        margin: 0;
+        font-size: 0.95rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav class="nav" aria-label="Primary">
+        <a href="/">Chat</a>
+        <a class="active" href="/config">Configuration</a>
+      </nav>
+
+      <h1>Configuration</h1>
+      <p>Edit the local app settings stored in <code>.env</code>. Port changes are saved immediately but take effect after a server restart.</p>
+
+      <form id="config-form">
+        <section class="field">
+          <label for="openai-api-key">OpenAI API Key</label>
+          <input id="openai-api-key" name="openai_api_key" type="password" autocomplete="off" placeholder="Enter a new API key" />
+          <p class="hint" id="api-key-hint">Loading current key status...</p>
+          <label class="checkbox" for="clear-api-key">
+            <input id="clear-api-key" name="clear_api_key" type="checkbox" />
+            Clear the stored API key
+          </label>
+        </section>
+
+        <section class="field">
+          <label for="openai-model">OpenAI Model</label>
+          <input id="openai-model" name="openai_model" type="text" required />
+          <p class="hint">This updates the model used by the chat page immediately.</p>
+        </section>
+
+        <section class="field">
+          <label for="port">Port</label>
+          <input id="port" name="port" type="number" min="1" max="65535" required />
+          <p class="hint" id="port-hint">Loading current port...</p>
+        </section>
+
+        <div class="actions">
+          <button id="save-button" type="submit">Save Configuration</button>
+          <p id="status">Loading current configuration...</p>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      const form = document.getElementById("config-form");
+      const apiKeyInput = document.getElementById("openai-api-key");
+      const apiKeyHint = document.getElementById("api-key-hint");
+      const clearApiKeyInput = document.getElementById("clear-api-key");
+      const modelInput = document.getElementById("openai-model");
+      const portInput = document.getElementById("port");
+      const portHint = document.getElementById("port-hint");
+      const saveButton = document.getElementById("save-button");
+      const status = document.getElementById("status");
+
+      function renderConfig(payload) {
+        modelInput.value = payload.openai_model;
+        portInput.value = payload.configured_port;
+        clearApiKeyInput.checked = false;
+        apiKeyInput.value = "";
+
+        if (payload.openai_api_key_set) {
+          apiKeyHint.textContent = `Stored key: ${payload.openai_api_key_hint}. Leave the field blank to keep it.`;
+        } else {
+          apiKeyHint.textContent = "No API key is currently stored.";
+        }
+
+        if (payload.server_port === payload.configured_port) {
+          portHint.textContent = `The server is currently running on port ${payload.server_port}.`;
+        } else {
+          portHint.textContent = `The server is running on port ${payload.server_port}, but the saved port is ${payload.configured_port}. Restart to apply the saved port.`;
+        }
+      }
+
+      async function loadConfig() {
+        status.textContent = "Loading current configuration...";
+
+        try {
+          const response = await fetch("/api/config");
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          renderConfig(payload);
+          status.textContent = "Current configuration loaded.";
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      }
+
+      async function saveConfig(event) {
+        event.preventDefault();
+
+        saveButton.disabled = true;
+        status.textContent = "Saving configuration...";
+
+        try {
+          const response = await fetch("/api/config", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              openai_api_key: apiKeyInput.value,
+              openai_model: modelInput.value.trim(),
+              port: portInput.value.trim(),
+              clear_api_key: clearApiKeyInput.checked,
+            }),
+          });
+
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          renderConfig(payload);
+          status.textContent = payload.message;
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          saveButton.disabled = false;
+        }
+      }
+
+      form.addEventListener("submit", saveConfig);
+      loadConfig();
+    </script>
+  </body>
+</html>
