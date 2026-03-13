@@ -235,6 +235,7 @@
     </main>
 
     <script>
+      const STORAGE_KEY = "news_assist_briefing_state";
       const form = document.getElementById("briefing-form");
       const queryInput = document.getElementById("query");
       const sendButton = document.getElementById("send-button");
@@ -242,6 +243,47 @@
       const questionPreview = document.getElementById("question-preview");
       const answers = document.getElementById("answers");
       const sources = document.getElementById("sources");
+
+      function defaultBriefingState() {
+        return {
+          query: "",
+          status: "Ready.",
+          answers: [{ question: "Waiting", answer: "Your reporting brief will appear here." }],
+          sources: [],
+          hasBriefing: false,
+        };
+      }
+
+      function loadBriefingState() {
+        try {
+          const raw = sessionStorage.getItem(STORAGE_KEY);
+          if (!raw) {
+            return defaultBriefingState();
+          }
+
+          const parsed = JSON.parse(raw);
+          return {
+            query: typeof parsed.query === "string" ? parsed.query : "",
+            status: typeof parsed.status === "string" ? parsed.status : "Ready.",
+            answers: Array.isArray(parsed.answers) ? parsed.answers : defaultBriefingState().answers,
+            sources: Array.isArray(parsed.sources) ? parsed.sources : [],
+            hasBriefing: Boolean(parsed.hasBriefing),
+          };
+        } catch (error) {
+          return defaultBriefingState();
+        }
+      }
+
+      let briefingState = loadBriefingState();
+
+      function persistBriefingState() {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(briefingState));
+      }
+
+      function updateBriefingState(updates) {
+        briefingState = { ...briefingState, ...updates };
+        persistBriefingState();
+      }
 
       function renderQuestionPreview(questions) {
         questionPreview.replaceChildren();
@@ -271,12 +313,12 @@
         }
       }
 
-      function renderSources(items) {
+      function renderSources(items, emptyMessage = "No web sources were returned for this briefing.") {
         sources.replaceChildren();
 
         if (!items.length) {
           const item = document.createElement("li");
-          item.textContent = "No web sources were returned for this briefing.";
+          item.textContent = emptyMessage;
           sources.appendChild(item);
           return;
         }
@@ -290,6 +332,18 @@
           link.textContent = source.title || source.url;
           item.appendChild(link);
           sources.appendChild(item);
+        }
+      }
+
+      function restoreBriefingState() {
+        queryInput.value = briefingState.query;
+        status.textContent = briefingState.status;
+        renderAnswers(briefingState.answers);
+
+        if (briefingState.hasBriefing) {
+          renderSources(briefingState.sources);
+        } else {
+          renderSources([], "Web search sources will appear here after a briefing is generated.");
         }
       }
 
@@ -317,6 +371,7 @@
         const query = queryInput.value.trim();
         if (!query) {
           status.textContent = "Enter a topic or event first.";
+          updateBriefingState({ query: queryInput.value, status: status.textContent });
           return;
         }
 
@@ -324,7 +379,7 @@
         sendButton.disabled = true;
         status.textContent = `Answering ${questionCount} reporting question(s)...`;
         renderAnswers([{ question: "Working", answer: "The briefing is being generated." }]);
-        renderSources([]);
+        renderSources([], "Web search sources will appear here after a briefing is generated.");
 
         try {
           const response = await fetch("/api/chat", {
@@ -343,16 +398,36 @@
           renderAnswers(payload.answers);
           renderSources(payload.sources || []);
           status.textContent = `Briefing generated with ${payload.model} using web search.`;
+          updateBriefingState({
+            query: queryInput.value,
+            status: status.textContent,
+            answers: payload.answers,
+            sources: payload.sources || [],
+            hasBriefing: true,
+          });
         } catch (error) {
-          renderAnswers([{ question: "Request failed", answer: error.message }]);
+          const failedAnswers = [{ question: "Request failed", answer: error.message }];
+          renderAnswers(failedAnswers);
           renderSources([]);
           status.textContent = error.message;
+          updateBriefingState({
+            query: queryInput.value,
+            status: status.textContent,
+            answers: failedAnswers,
+            sources: [],
+            hasBriefing: true,
+          });
         } finally {
           sendButton.disabled = false;
         }
       }
 
+      queryInput.addEventListener("input", () => {
+        updateBriefingState({ query: queryInput.value });
+      });
+
       form.addEventListener("submit", submitBriefing);
+      restoreBriefingState();
       loadConfig();
     </script>
   </body>
