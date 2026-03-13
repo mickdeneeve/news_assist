@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -32,6 +33,7 @@ DEFAULT_REPORTING_QUESTIONS = [
     "What context or background does a reader need?",
     "What remains unknown, disputed, or unverified?",
 ]
+URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 
 
 def parse_env_line(raw_line: str) -> tuple[str, str] | None:
@@ -234,15 +236,82 @@ def build_briefing_prompt(topic: str, questions: list[str]) -> str:
         "provided topic or event. Write concise, factual briefings for a reporter. Be explicit about uncertainty, "
         "distinguish what is known from what remains unclear, and do not invent sources, quotes, or details. "
         "Return valid JSON only, with "
-        'this exact shape: {"answers":[{"question":"<copy the original question>","answer":"<answer>"}]}. '
-        "Keep the questions in the same order and include every question exactly once."
+        'this exact shape: {"answers":[{"question":"<copy the original question>","answer":"<answer with no URLs>",'
+        '"links":["<relevant source url>"]}]}. Keep the questions in the same order and include every question '
+        "exactly once. Put source URLs only in the links array, never inside the answer text. If an answer has no "
+        "relevant source URL to list, return an empty links array."
         "\n\n"
         f"Topic or event:\n{topic}\n\n"
         f"Reporting questions:\n{numbered_questions}\n"
     )
 
 
-def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str]]:
+def extract_urls(text: str) -> list[str]:
+    urls: list[str] = []
+    for match in URL_PATTERN.finditer(text):
+        url = match.group(0).rstrip(".,);]")
+        if url:
+            urls.append(url)
+    return urls
+
+
+def unique_urls(urls: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+
+    for url in urls:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+
+    return deduped
+
+
+def normalize_answer_links(raw_links: object) -> list[str]:
+    if not isinstance(raw_links, list):
+        return []
+
+    urls: list[str] = []
+    for item in raw_links:
+        urls.extend(extract_urls(str(item)))
+
+    return unique_urls(urls)
+
+
+def split_answer_links(answer: str) -> tuple[str, list[str]]:
+    lines = answer.strip().splitlines()
+    trailing_urls: list[str] = []
+    end_index = len(lines)
+
+    while end_index > 0:
+        line = lines[end_index - 1].strip()
+        if not line:
+            end_index -= 1
+            continue
+
+        lower = line.lower()
+        if lower in {"links:", "link:", "sources:", "source:"}:
+            end_index -= 1
+            break
+
+        urls = extract_urls(line)
+        if not urls:
+            break
+
+        remainder = URL_PATTERN.sub("", line)
+        remainder = re.sub(r"[\s,*\-•]+", " ", remainder).strip()
+        if remainder and remainder.lower().rstrip(":") not in {"links", "link", "sources", "source"}:
+            break
+
+        trailing_urls = urls + trailing_urls
+        end_index -= 1
+
+    cleaned_answer = "\n".join(lines[:end_index]).strip()
+    return cleaned_answer or answer.strip(), unique_urls(trailing_urls)
+
+
+def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, object]]:
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = "\n".join(
@@ -259,7 +328,7 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str
     if not isinstance(answers, list) or len(answers) != len(questions):
         raise ValueError("OpenAI returned an unexpected answers payload.")
 
-    normalized_answers: list[dict[str, str]] = []
+    normalized_answers: list[dict[str, object]] = []
     for question, item in zip(questions, answers):
         if not isinstance(item, dict):
             raise ValueError("OpenAI returned a malformed answer entry.")
@@ -268,7 +337,18 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str
         if not answer:
             raise ValueError("OpenAI returned an empty answer.")
 
-        normalized_answers.append({"question": question, "answer": answer})
+        cleaned_answer, trailing_links = split_answer_links(answer)
+        if not cleaned_answer:
+            raise ValueError("OpenAI returned an empty answer.")
+
+        explicit_links = normalize_answer_links(item.get("links"))
+        normalized_answers.append(
+            {
+                "question": question,
+                "answer": cleaned_answer,
+                "links": unique_urls(explicit_links + trailing_links),
+            }
+        )
 
     return normalized_answers
 

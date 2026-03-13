@@ -180,6 +180,31 @@
         user-select: text;
       }
 
+      .answer-links-block {
+        margin-top: 0.9rem;
+        padding-top: 0.85rem;
+        border-top: 1px solid rgba(24, 33, 38, 0.08);
+      }
+
+      .answer-links-label {
+        margin: 0 0 0.45rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      .answer-links {
+        margin: 0;
+        padding-left: 1.2rem;
+      }
+
+      .answer-links li + li {
+        margin-top: 0.45rem;
+      }
+
+      .answer-links a,
       #sources a {
         color: var(--accent-strong);
       }
@@ -359,12 +384,104 @@
       const DEFAULT_ARTICLE_STATUS = "Select highlighted excerpts, then draft the article.";
       const DEFAULT_HIGHLIGHT_NOTE =
         "Select text in any answer to apply a persistent yellow highlight. Those highlights feed the article draft.";
+      const URL_PATTERN = /https?:\/\/[^\s<>()]+/gi;
+
+      function extractUrls(text) {
+        const matches = String(text || "").match(URL_PATTERN) || [];
+        return matches.map((url) => url.replace(/[.,);]+$/g, ""));
+      }
+
+      function uniqueUrls(urls) {
+        const seen = new Set();
+        return urls.filter((url) => {
+          if (!url || seen.has(url)) {
+            return false;
+          }
+          seen.add(url);
+          return true;
+        });
+      }
+
+      function splitTrailingLinks(answerText) {
+        const lines = String(answerText || "").trim().split(/\r?\n/);
+        const trailingUrls = [];
+        let endIndex = lines.length;
+
+        while (endIndex > 0) {
+          const line = lines[endIndex - 1].trim();
+          if (!line) {
+            endIndex -= 1;
+            continue;
+          }
+
+          if (/^(links?|sources?)\s*:\s*$/i.test(line)) {
+            endIndex -= 1;
+            break;
+          }
+
+          const urls = extractUrls(line);
+          if (!urls.length) {
+            break;
+          }
+
+          const remainder = line
+            .replace(URL_PATTERN, "")
+            .replace(/[\s,*\-•]+/g, " ")
+            .trim();
+          if (remainder && !/^(links?|sources?)\s*:?\s*$/i.test(remainder)) {
+            break;
+          }
+
+          trailingUrls.unshift(...urls);
+          endIndex -= 1;
+        }
+
+        const cleanedAnswer = lines.slice(0, endIndex).join("\n").trim();
+        return {
+          answer: cleanedAnswer || String(answerText || "").trim(),
+          links: uniqueUrls(trailingUrls),
+        };
+      }
+
+      function normalizeAnswerItem(item) {
+        const question = typeof item?.question === "string" ? item.question : "";
+        const rawAnswer = typeof item?.answer === "string" ? item.answer : "";
+        const splitAnswer = splitTrailingLinks(rawAnswer);
+        const explicitLinks = Array.isArray(item?.links)
+          ? uniqueUrls(item.links.flatMap((value) => extractUrls(String(value))))
+          : [];
+
+        return {
+          question,
+          answer: splitAnswer.answer,
+          links: uniqueUrls([...explicitLinks, ...splitAnswer.links]),
+        };
+      }
+
+      function normalizeAnswerItems(items) {
+        if (!Array.isArray(items) || !items.length) {
+          return [
+            {
+              question: "Waiting",
+              answer: "Your reporting brief will appear here.",
+              links: [],
+            },
+          ];
+        }
+
+        return items
+          .filter((item) => item && typeof item === "object")
+          .map(normalizeAnswerItem)
+          .filter((item) => item.question && item.answer);
+      }
 
       function defaultBriefingState() {
         return {
           query: "",
           status: "Ready.",
-          answers: [{ question: "Waiting", answer: "Your reporting brief will appear here." }],
+          answers: normalizeAnswerItems([
+            { question: "Waiting", answer: "Your reporting brief will appear here.", links: [] },
+          ]),
           sources: [],
           hasBriefing: false,
           highlights: [],
@@ -385,7 +502,7 @@
           return {
             query: typeof parsed.query === "string" ? parsed.query : "",
             status: typeof parsed.status === "string" ? parsed.status : "Ready.",
-            answers: Array.isArray(parsed.answers) ? parsed.answers : defaultBriefingState().answers,
+            answers: normalizeAnswerItems(parsed.answers),
             sources: Array.isArray(parsed.sources) ? parsed.sources : [],
             hasBriefing: Boolean(parsed.hasBriefing),
             highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
@@ -533,6 +650,7 @@
 
       briefingState = {
         ...briefingState,
+        answers: normalizeAnswerItems(briefingState.answers),
         highlights: normalizeStoredHighlights(briefingState.highlights, briefingState.answers),
       };
       persistBriefingState();
@@ -595,6 +713,33 @@
           body.appendChild(buildAnswerFragment(item.question, item.answer));
 
           card.append(heading, body);
+
+          if (Array.isArray(item.links) && item.links.length) {
+            const linkBlock = document.createElement("div");
+            linkBlock.className = "answer-links-block";
+
+            const linkLabel = document.createElement("p");
+            linkLabel.className = "answer-links-label";
+            linkLabel.textContent = "Answer Links";
+
+            const linkList = document.createElement("ol");
+            linkList.className = "answer-links";
+
+            item.links.forEach((url) => {
+              const linkItem = document.createElement("li");
+              const link = document.createElement("a");
+              link.href = url;
+              link.target = "_blank";
+              link.rel = "noreferrer noopener";
+              link.textContent = url;
+              linkItem.appendChild(link);
+              linkList.appendChild(linkItem);
+            });
+
+            linkBlock.append(linkLabel, linkList);
+            card.appendChild(linkBlock);
+          }
+
           answers.appendChild(card);
         }
       }
@@ -827,7 +972,7 @@
         const questionCount = questionPreview.children.length;
         sendButton.disabled = true;
         status.textContent = `Answering ${questionCount} reporting question(s)...`;
-        renderAnswers([{ question: "Working", answer: "The briefing is being generated." }]);
+        renderAnswers(normalizeAnswerItems([{ question: "Working", answer: "The briefing is being generated." }]));
         renderSources([], "Web search sources will appear here after a briefing is generated.");
         renderHighlightNote();
         updateBriefingState({
@@ -852,11 +997,12 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
+          const normalizedAnswers = normalizeAnswerItems(payload.answers);
           status.textContent = `Briefing generated with ${payload.model} using web search.`;
           updateBriefingState({
             query: queryInput.value,
             status: status.textContent,
-            answers: payload.answers,
+            answers: normalizedAnswers,
             sources: payload.sources || [],
             hasBriefing: true,
             highlights: [],
@@ -868,7 +1014,9 @@
           renderHighlights();
           renderArticleDraft();
         } catch (error) {
-          const failedAnswers = [{ question: "Request failed", answer: error.message }];
+          const failedAnswers = normalizeAnswerItems([
+            { question: "Request failed", answer: error.message, links: [] },
+          ]);
           status.textContent = error.message;
           updateBriefingState({
             query: queryInput.value,
