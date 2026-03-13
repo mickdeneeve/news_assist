@@ -169,6 +169,19 @@
         color: var(--text);
         white-space: pre-wrap;
       }
+
+      #sources {
+        margin: 0;
+        padding-left: 1.2rem;
+      }
+
+      #sources li + li {
+        margin-top: 0.55rem;
+      }
+
+      #sources a {
+        color: var(--accent-strong);
+      }
     </style>
   </head>
   <body>
@@ -212,6 +225,13 @@
           </div>
         </div>
       </section>
+
+      <section class="panel" aria-live="polite">
+        <p class="label">Sources Consulted</p>
+        <ol id="sources">
+          <li>Web search sources will appear here after a briefing is generated.</li>
+        </ol>
+      </section>
     </main>
 
     <script>
@@ -221,6 +241,7 @@
       const status = document.getElementById("status");
       const questionPreview = document.getElementById("question-preview");
       const answers = document.getElementById("answers");
+      const sources = document.getElementById("sources");
 
       function renderQuestionPreview(questions) {
         questionPreview.replaceChildren();
@@ -247,6 +268,28 @@
 
           card.append(heading, body);
           answers.appendChild(card);
+        }
+      }
+
+      function renderSources(items) {
+        sources.replaceChildren();
+
+        if (!items.length) {
+          const item = document.createElement("li");
+          item.textContent = "No web sources were returned for this briefing.";
+          sources.appendChild(item);
+          return;
+        }
+
+        for (const source of items) {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = source.url;
+          link.target = "_blank";
+          link.rel = "noreferrer noopener";
+          link.textContent = source.title || source.url;
+          item.appendChild(link);
+          sources.appendChild(item);
         }
       }
 
@@ -281,6 +324,7 @@
         sendButton.disabled = true;
         status.textContent = `Answering ${questionCount} reporting question(s)...`;
         renderAnswers([{ question: "Working", answer: "The briefing is being generated." }]);
+        renderSources([]);
 
         try {
           const response = await fetch("/api/chat", {
@@ -297,9 +341,11 @@
           }
 
           renderAnswers(payload.answers);
-          status.textContent = `Briefing generated with ${payload.model}.`;
+          renderSources(payload.sources || []);
+          status.textContent = `Briefing generated with ${payload.model} using web search.`;
         } catch (error) {
           renderAnswers([{ question: "Request failed", answer: error.message }]);
+          renderSources([]);
           status.textContent = error.message;
         } finally {
           sendButton.disabled = false;

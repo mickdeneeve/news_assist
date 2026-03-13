@@ -230,9 +230,10 @@ def build_briefing_prompt(topic: str, questions: list[str]) -> str:
     )
 
     return (
-        "You are a journalism research assistant. Answer each reporting question about the provided topic or event. "
-        "Write concise, factual briefings for a reporter. Be explicit about uncertainty, distinguish what is known "
-        "from what remains unclear, and do not invent sources, quotes, or details. Return valid JSON only, with "
+        "You are a journalism research assistant. Use web search to answer each reporting question about the "
+        "provided topic or event. Write concise, factual briefings for a reporter. Be explicit about uncertainty, "
+        "distinguish what is known from what remains unclear, and do not invent sources, quotes, or details. "
+        "Return valid JSON only, with "
         'this exact shape: {"answers":[{"question":"<copy the original question>","answer":"<answer>"}]}. '
         "Keep the questions in the same order and include every question exactly once."
         "\n\n"
@@ -270,6 +271,37 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str
         normalized_answers.append({"question": question, "answer": answer})
 
     return normalized_answers
+
+
+def extract_web_search_sources(payload: dict[str, object]) -> list[dict[str, str]]:
+    seen_urls: set[str] = set()
+    sources: list[dict[str, str]] = []
+
+    for item in payload.get("output", []):
+        if not isinstance(item, dict) or item.get("type") != "web_search_call":
+            continue
+
+        action = item.get("action", {})
+        if not isinstance(action, dict):
+            continue
+
+        raw_sources = action.get("sources", [])
+        if not isinstance(raw_sources, list):
+            continue
+
+        for source in raw_sources:
+            if not isinstance(source, dict):
+                continue
+
+            url = str(source.get("url", "")).strip()
+            title = str(source.get("title", "")).strip()
+            if not url or url in seen_urls:
+                continue
+
+            seen_urls.add(url)
+            sources.append({"title": title or url, "url": url})
+
+    return sources
 
 
 def iter_watched_files() -> list[Path]:
@@ -413,7 +445,13 @@ class AppHandler(SimpleHTTPRequestHandler):
         model = current_model()
         reporting_questions = read_reporting_config(REPORTING_CONFIG_FILE)["questions"]
         request_body = json.dumps(
-            {"model": model, "input": build_briefing_prompt(topic, reporting_questions)}
+            {
+                "model": model,
+                "tools": [{"type": "web_search"}],
+                "tool_choice": "auto",
+                "include": ["web_search_call.action.sources"],
+                "input": build_briefing_prompt(topic, reporting_questions),
+            }
         ).encode("utf-8")
         request = Request(
             OPENAI_RESPONSES_API_URL,
@@ -447,12 +485,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(502, {"error": f"OpenAI returned an invalid briefing payload: {error}"})
             return
 
+        sources = extract_web_search_sources(upstream_payload)
+
         self._send_json(
             200,
             {
                 "model": model,
                 "topic": topic,
                 "answers": answers,
+                "sources": sources,
             },
         )
 
