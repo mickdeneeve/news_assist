@@ -12,10 +12,19 @@ from urllib.request import Request, urlopen
 ROOT_DIR = Path(__file__).parent
 STATIC_DIR = ROOT_DIR / "static"
 ENV_FILE = ROOT_DIR / ".env"
-OPENAI_API_URL = "https://api.openai.com/v1/responses"
+REPORTING_CONFIG_FILE = ROOT_DIR / "journalism_config.json"
+OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
+OPENAI_MODELS_API_URL = "https://api.openai.com/v1/models"
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_PORT = "8000"
 CONFIG_KEYS = ("OPENAI_API_KEY", "OPENAI_MODEL", "PORT")
+DEFAULT_REPORTING_QUESTIONS = [
+    "What happened, in one clear summary?",
+    "Who are the key people, organizations, or institutions involved?",
+    "Why does this matter right now?",
+    "What context or background does a reader need?",
+    "What remains unknown, disputed, or unverified?",
+]
 
 
 def parse_env_line(raw_line: str) -> tuple[str, str] | None:
@@ -96,20 +105,177 @@ def current_port() -> str:
     return os.environ.get("PORT", DEFAULT_PORT).strip() or DEFAULT_PORT
 
 
-def mask_secret(secret: str) -> str:
-    if not secret:
-        return ""
-    if len(secret) <= 4:
-        return "****"
-    return f"****{secret[-4:]}"
+def default_reporting_config() -> dict[str, list[str]]:
+    return {"questions": DEFAULT_REPORTING_QUESTIONS.copy()}
+
+
+def normalize_questions(raw_questions: object) -> list[str]:
+    normalized: list[str] = []
+    if not isinstance(raw_questions, list):
+        return normalized
+
+    for raw_question in raw_questions:
+        question = str(raw_question).strip()
+        if question:
+            normalized.append(question)
+
+    return normalized
+
+
+def read_reporting_config(path: Path) -> dict[str, list[str]]:
+    if not path.exists():
+        return default_reporting_config()
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return default_reporting_config()
+
+    if not isinstance(payload, dict):
+        return default_reporting_config()
+
+    questions = normalize_questions(payload.get("questions"))
+    if not questions:
+        questions = DEFAULT_REPORTING_QUESTIONS.copy()
+
+    return {"questions": questions}
+
+
+def write_reporting_config(path: Path, questions: list[str]) -> None:
+    payload = {"questions": questions}
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def ensure_local_reporting_config() -> None:
+    if REPORTING_CONFIG_FILE.exists():
+        return
+
+    write_reporting_config(REPORTING_CONFIG_FILE, DEFAULT_REPORTING_QUESTIONS.copy())
+
+
+def extract_openai_error_message(raw_error: bytes) -> str:
+    try:
+        payload = json.loads(raw_error)
+    except json.JSONDecodeError:
+        return raw_error.decode("utf-8", errors="replace") or "OpenAI request failed."
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return str(error.get("message", "OpenAI request failed."))
+    return "OpenAI request failed."
+
+
+def extract_output_text(payload: dict[str, object]) -> str:
+    pieces: list[str] = []
+
+    for item in payload.get("output", []):
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+
+        for content in item.get("content", []):
+            if isinstance(content, dict) and content.get("type") == "output_text":
+                text = content.get("text", "")
+                if text:
+                    pieces.append(str(text))
+
+    return "\n\n".join(pieces).strip()
+
+
+def fetch_available_models() -> tuple[list[str], str | None]:
+    current = current_model()
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return [current], "OPENAI_API_KEY is not configured on the server."
+
+    request = Request(
+        OPENAI_MODELS_API_URL,
+        method="GET",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+
+    try:
+        with urlopen(request, timeout=60) as response:
+            payload = json.loads(response.read())
+    except HTTPError as error:
+        return [current], extract_openai_error_message(error.read())
+    except URLError as error:
+        return [current], f"Could not reach OpenAI: {error.reason}"
+
+    data = payload.get("data", [])
+    models = sorted(
+        {
+            str(item.get("id", "")).strip()
+            for item in data
+            if isinstance(item, dict) and str(item.get("id", "")).strip()
+        },
+        key=str.lower,
+    )
+
+    if current not in models:
+        models.insert(0, current)
+
+    return models, None
+
+
+def build_briefing_prompt(topic: str, questions: list[str]) -> str:
+    numbered_questions = "\n".join(
+        f"{index}. {question}" for index, question in enumerate(questions, start=1)
+    )
+
+    return (
+        "You are a journalism research assistant. Answer each reporting question about the provided topic or event. "
+        "Write concise, factual briefings for a reporter. Be explicit about uncertainty, distinguish what is known "
+        "from what remains unclear, and do not invent sources, quotes, or details. Return valid JSON only, with "
+        'this exact shape: {"answers":[{"question":"<copy the original question>","answer":"<answer>"}]}. '
+        "Keep the questions in the same order and include every question exactly once."
+        "\n\n"
+        f"Topic or event:\n{topic}\n\n"
+        f"Reporting questions:\n{numbered_questions}\n"
+    )
+
+
+def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str]]:
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = "\n".join(
+            line for line in candidate.splitlines() if not line.strip().startswith("```")
+        ).strip()
+
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = candidate[start : end + 1]
+
+    payload = json.loads(candidate)
+    answers = payload.get("answers")
+    if not isinstance(answers, list) or len(answers) != len(questions):
+        raise ValueError("OpenAI returned an unexpected answers payload.")
+
+    normalized_answers: list[dict[str, str]] = []
+    for question, item in zip(questions, answers):
+        if not isinstance(item, dict):
+            raise ValueError("OpenAI returned a malformed answer entry.")
+
+        answer = str(item.get("answer", "")).strip()
+        if not answer:
+            raise ValueError("OpenAI returned an empty answer.")
+
+        normalized_answers.append({"question": question, "answer": answer})
+
+    return normalized_answers
 
 
 load_dotenv(ENV_FILE)
+ensure_local_reporting_config()
 
 
 class AppHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
+
+    def do_HEAD(self) -> None:
+        self._map_static_route()
+        super().do_HEAD()
 
     def do_GET(self) -> None:
         route = urlparse(self.path).path
@@ -118,42 +284,40 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(
                 200,
                 {
-                    "message": "Use POST /api/chat with a query to talk to the model.",
+                    "message": "Use the main page to brief a topic or event against your configured reporting questions.",
                     "model": current_model(),
                 },
             )
             return
+
         if route == "/api/config":
             self._send_json(200, self._config_payload())
             return
 
-        if route == "/":
-            self.path = "/index.html"
-        elif route == "/config":
-            self.path = "/config.html"
-        else:
-            self.path = route
+        self._map_static_route()
         super().do_GET()
 
     def do_POST(self) -> None:
         route = urlparse(self.path).path
+
         if route == "/api/chat":
-            self._handle_chat()
+            self._handle_briefing_request()
             return
+
         if route == "/api/config":
             self._handle_config_update()
             return
 
         self._send_json(404, {"error": "Route not found."})
 
-    def _handle_chat(self) -> None:
+    def _handle_briefing_request(self) -> None:
         payload = self._read_json_body()
         if payload is None:
             return
 
-        query = str(payload.get("query", "")).strip()
-        if not query:
-            self._send_json(400, {"error": "Please provide a non-empty query."})
+        topic = str(payload.get("query", "")).strip()
+        if not topic:
+            self._send_json(400, {"error": "Please provide a topic or event to investigate."})
             return
 
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -162,9 +326,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         model = current_model()
-        request_body = json.dumps({"model": model, "input": query}).encode("utf-8")
+        reporting_questions = read_reporting_config(REPORTING_CONFIG_FILE)["questions"]
+        request_body = json.dumps(
+            {"model": model, "input": build_briefing_prompt(topic, reporting_questions)}
+        ).encode("utf-8")
         request = Request(
-            OPENAI_API_URL,
+            OPENAI_RESPONSES_API_URL,
             data=request_body,
             method="POST",
             headers={
@@ -177,19 +344,32 @@ class AppHandler(SimpleHTTPRequestHandler):
             with urlopen(request, timeout=60) as response:
                 upstream_payload = json.loads(response.read())
         except HTTPError as error:
-            message = self._extract_error_message(error.read())
+            message = extract_openai_error_message(error.read())
             self._send_json(error.code, {"error": message})
             return
         except URLError as error:
             self._send_json(502, {"error": f"Could not reach OpenAI: {error.reason}"})
             return
 
-        answer = self._extract_output_text(upstream_payload)
-        if not answer:
+        raw_output = extract_output_text(upstream_payload)
+        if not raw_output:
             self._send_json(502, {"error": "OpenAI returned no text output."})
             return
 
-        self._send_json(200, {"model": model, "response": answer})
+        try:
+            answers = parse_briefing_output(raw_output, reporting_questions)
+        except (ValueError, json.JSONDecodeError) as error:
+            self._send_json(502, {"error": f"OpenAI returned an invalid briefing payload: {error}"})
+            return
+
+        self._send_json(
+            200,
+            {
+                "model": model,
+                "topic": topic,
+                "answers": answers,
+            },
+        )
 
     def _handle_config_update(self) -> None:
         payload = self._read_json_body()
@@ -201,33 +381,17 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"error": "OPENAI_MODEL cannot be empty."})
             return
 
-        port = str(payload.get("port", current_port())).strip()
-        if not port.isdigit() or not 1 <= int(port) <= 65535:
-            self._send_json(400, {"error": "PORT must be a number between 1 and 65535."})
+        questions = normalize_questions(payload.get("questions"))
+        if not questions:
+            self._send_json(400, {"error": "Add at least one reporting question."})
             return
 
-        updates = {"OPENAI_MODEL": model, "PORT": port}
-        clear_api_key = bool(payload.get("clear_api_key"))
-        new_api_key = str(payload.get("openai_api_key", "")).strip()
-
-        if clear_api_key:
-            updates["OPENAI_API_KEY"] = ""
-        elif new_api_key:
-            updates["OPENAI_API_KEY"] = new_api_key
-
-        write_env_file(ENV_FILE, updates)
-        for key, value in updates.items():
-            os.environ[key] = value
-
-        server_port = str(self.server.server_address[1])
-        restart_required = port != server_port
-        message = "Configuration saved."
-        if restart_required:
-            message += f" Restart the server to switch from port {server_port} to {port}."
+        write_env_file(ENV_FILE, {"OPENAI_MODEL": model})
+        os.environ["OPENAI_MODEL"] = model
+        write_reporting_config(REPORTING_CONFIG_FILE, questions)
 
         response_payload = self._config_payload()
-        response_payload["message"] = message
-        response_payload["restart_required"] = restart_required
+        response_payload["message"] = "Configuration saved."
         self._send_json(200, response_payload)
 
     def _read_json_body(self) -> dict[str, object] | None:
@@ -251,17 +415,24 @@ class AppHandler(SimpleHTTPRequestHandler):
         return payload
 
     def _config_payload(self) -> dict[str, object]:
-        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-        configured_port = current_port()
-        server_port = str(self.server.server_address[1])
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        available_models, models_error = fetch_available_models()
 
         return {
-            "openai_api_key_hint": mask_secret(api_key),
-            "openai_api_key_set": bool(api_key),
             "openai_model": current_model(),
-            "configured_port": configured_port,
-            "server_port": server_port,
+            "available_models": available_models,
+            "questions": reporting_config["questions"],
+            "models_error": models_error,
         }
+
+    def _map_static_route(self) -> None:
+        route = urlparse(self.path).path
+        if route == "/":
+            self.path = "/index.html"
+        elif route == "/config":
+            self.path = "/config.html"
+        else:
+            self.path = route
 
     def _send_json(self, status_code: int, payload: dict[str, object]) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -271,35 +442,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _extract_error_message(self, raw_error: bytes) -> str:
-        try:
-            payload = json.loads(raw_error)
-        except json.JSONDecodeError:
-            return raw_error.decode("utf-8", errors="replace") or "OpenAI request failed."
-
-        error = payload.get("error")
-        if isinstance(error, dict):
-            return str(error.get("message", "OpenAI request failed."))
-        return "OpenAI request failed."
-
-    def _extract_output_text(self, payload: dict[str, object]) -> str:
-        pieces: list[str] = []
-
-        for item in payload.get("output", []):
-            if not isinstance(item, dict) or item.get("type") != "message":
-                continue
-
-            for content in item.get("content", []):
-                if isinstance(content, dict) and content.get("type") == "output_text":
-                    text = content.get("text", "")
-                    if text:
-                        pieces.append(str(text))
-
-        return "\n\n".join(pieces).strip()
-
 
 def main() -> None:
-    port = int(os.environ.get("PORT", "8000"))
+    port = int(current_port())
     server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
     print(f"Serving on http://127.0.0.1:{port}")
     server.serve_forever()

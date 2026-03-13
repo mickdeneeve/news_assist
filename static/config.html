@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Configuration</title>
+    <title>Briefing Configuration</title>
     <style>
       :root {
         --bg-top: #f7efe2;
@@ -33,7 +33,7 @@
       }
 
       main {
-        width: min(92vw, 760px);
+        width: min(94vw, 900px);
         padding: 3rem;
         border: 1px solid rgba(24, 33, 38, 0.08);
         border-radius: 28px;
@@ -83,7 +83,7 @@
       }
 
       .field {
-        padding: 1.2rem;
+        padding: 1.25rem;
         border: 1px solid rgba(24, 33, 38, 0.09);
         border-radius: 22px;
         background: rgba(255, 255, 255, 0.62);
@@ -99,6 +99,7 @@
         color: var(--accent);
       }
 
+      select,
       input {
         width: 100%;
         padding: 0.9rem 1rem;
@@ -114,28 +115,56 @@
         font-size: 0.94rem;
       }
 
-      .checkbox {
+      .toolbar {
         display: flex;
         align-items: center;
-        gap: 0.7rem;
+        gap: 0.8rem;
         margin-top: 1rem;
-        font-size: 0.95rem;
-        color: var(--text);
       }
 
-      .checkbox input {
-        width: auto;
-        margin: 0;
+      .icon-button {
+        width: 2.4rem;
+        height: 2.4rem;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+        color: white;
+        font-size: 1.4rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .question-list {
+        display: grid;
+        gap: 0.85rem;
+      }
+
+      .question-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.8rem;
+        align-items: center;
+      }
+
+      .remove-button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.75rem 1rem;
+        background: rgba(24, 33, 38, 0.08);
+        color: var(--text);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
       }
 
       .actions {
         display: flex;
         align-items: center;
         gap: 1rem;
-        margin-top: 0.5rem;
       }
 
-      button {
+      .save-button {
         border: 0;
         border-radius: 999px;
         padding: 0.85rem 1.4rem;
@@ -160,38 +189,32 @@
   <body>
     <main>
       <nav class="nav" aria-label="Primary">
-        <a href="/">Chat</a>
+        <a href="/">Briefing</a>
         <a class="active" href="/config">Configuration</a>
       </nav>
 
-      <h1>Configuration</h1>
-      <p>Edit the local app settings stored in <code>.env</code>. Port changes are saved immediately but take effect after a server restart.</p>
+      <h1>Briefing Configuration</h1>
+      <p>Choose the OpenAI model and define the reporting questions the newsroom brief should answer for any topic or event.</p>
 
       <form id="config-form">
         <section class="field">
-          <label for="openai-api-key">OpenAI API Key</label>
-          <input id="openai-api-key" name="openai_api_key" type="password" autocomplete="off" placeholder="Enter a new API key" />
-          <p class="hint" id="api-key-hint">Loading current key status...</p>
-          <label class="checkbox" for="clear-api-key">
-            <input id="clear-api-key" name="clear_api_key" type="checkbox" />
-            Clear the stored API key
-          </label>
-        </section>
-
-        <section class="field">
           <label for="openai-model">OpenAI Model</label>
-          <input id="openai-model" name="openai_model" type="text" required />
-          <p class="hint">This updates the model used by the chat page immediately.</p>
+          <select id="openai-model" name="openai_model" required></select>
+          <p class="hint" id="model-hint">Loading the current model list...</p>
         </section>
 
         <section class="field">
-          <label for="port">Port</label>
-          <input id="port" name="port" type="number" min="1" max="65535" required />
-          <p class="hint" id="port-hint">Loading current port...</p>
+          <label>Reporting Questions</label>
+          <div id="questions-list" class="question-list"></div>
+
+          <div class="toolbar">
+            <button id="add-question" class="icon-button" type="button" aria-label="Add question">+</button>
+            <span>Add another reporting question</span>
+          </div>
         </section>
 
         <div class="actions">
-          <button id="save-button" type="submit">Save Configuration</button>
+          <button id="save-button" class="save-button" type="submit">Save Configuration</button>
           <p id="status">Loading current configuration...</p>
         </div>
       </form>
@@ -199,32 +222,71 @@
 
     <script>
       const form = document.getElementById("config-form");
-      const apiKeyInput = document.getElementById("openai-api-key");
-      const apiKeyHint = document.getElementById("api-key-hint");
-      const clearApiKeyInput = document.getElementById("clear-api-key");
-      const modelInput = document.getElementById("openai-model");
-      const portInput = document.getElementById("port");
-      const portHint = document.getElementById("port-hint");
+      const modelSelect = document.getElementById("openai-model");
+      const modelHint = document.getElementById("model-hint");
+      const questionsList = document.getElementById("questions-list");
+      const addQuestionButton = document.getElementById("add-question");
       const saveButton = document.getElementById("save-button");
       const status = document.getElementById("status");
 
-      function renderConfig(payload) {
-        modelInput.value = payload.openai_model;
-        portInput.value = payload.configured_port;
-        clearApiKeyInput.checked = false;
-        apiKeyInput.value = "";
+      function addQuestionRow(value = "") {
+        const row = document.createElement("div");
+        row.className = "question-row";
 
-        if (payload.openai_api_key_set) {
-          apiKeyHint.textContent = `Stored key: ${payload.openai_api_key_hint}. Leave the field blank to keep it.`;
-        } else {
-          apiKeyHint.textContent = "No API key is currently stored.";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "Enter a reporting question";
+        input.value = value;
+        input.required = true;
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "remove-button";
+        removeButton.textContent = "Remove";
+        removeButton.addEventListener("click", () => {
+          row.remove();
+
+          if (!questionsList.children.length) {
+            addQuestionRow();
+          }
+        });
+
+        row.append(input, removeButton);
+        questionsList.appendChild(row);
+      }
+
+      function renderQuestions(questions) {
+        questionsList.replaceChildren();
+
+        for (const question of questions) {
+          addQuestionRow(question);
         }
 
-        if (payload.server_port === payload.configured_port) {
-          portHint.textContent = `The server is currently running on port ${payload.server_port}.`;
-        } else {
-          portHint.textContent = `The server is running on port ${payload.server_port}, but the saved port is ${payload.configured_port}. Restart to apply the saved port.`;
+        if (!questionsList.children.length) {
+          addQuestionRow();
         }
+      }
+
+      function renderModelOptions(currentModel, availableModels) {
+        modelSelect.replaceChildren();
+
+        for (const model of availableModels) {
+          const option = document.createElement("option");
+          option.value = model;
+          option.textContent = model;
+
+          if (model === currentModel) {
+            option.selected = true;
+          }
+
+          modelSelect.appendChild(option);
+        }
+      }
+
+      function collectQuestions() {
+        return Array.from(questionsList.querySelectorAll("input"))
+          .map((input) => input.value.trim())
+          .filter(Boolean);
       }
 
       async function loadConfig() {
@@ -238,7 +300,13 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          renderConfig(payload);
+          renderModelOptions(payload.openai_model, payload.available_models);
+          renderQuestions(payload.questions);
+
+          modelHint.textContent = payload.models_error
+            ? `Live model list unavailable: ${payload.models_error}`
+            : `${payload.available_models.length} model(s) available from OpenAI.`;
+
           status.textContent = "Current configuration loaded.";
         } catch (error) {
           status.textContent = error.message;
@@ -247,6 +315,12 @@
 
       async function saveConfig(event) {
         event.preventDefault();
+
+        const questions = collectQuestions();
+        if (!questions.length) {
+          status.textContent = "Add at least one reporting question.";
+          return;
+        }
 
         saveButton.disabled = true;
         status.textContent = "Saving configuration...";
@@ -258,10 +332,8 @@
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              openai_api_key: apiKeyInput.value,
-              openai_model: modelInput.value.trim(),
-              port: portInput.value.trim(),
-              clear_api_key: clearApiKeyInput.checked,
+              openai_model: modelSelect.value,
+              questions,
             }),
           });
 
@@ -270,7 +342,13 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          renderConfig(payload);
+          renderModelOptions(payload.openai_model, payload.available_models);
+          renderQuestions(payload.questions);
+
+          modelHint.textContent = payload.models_error
+            ? `Live model list unavailable: ${payload.models_error}`
+            : `${payload.available_models.length} model(s) available from OpenAI.`;
+
           status.textContent = payload.message;
         } catch (error) {
           status.textContent = error.message;
@@ -279,6 +357,7 @@
         }
       }
 
+      addQuestionButton.addEventListener("click", () => addQuestionRow());
       form.addEventListener("submit", saveConfig);
       loadConfig();
     </script>

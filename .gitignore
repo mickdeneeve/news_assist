@@ -4,6 +4,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+journalism_config.json
+!journalism_config.example.json
 
 .venv/
 venv/

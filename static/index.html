@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GPT-5.4 Demo</title>
+    <title>Journalism Briefing Desk</title>
     <style>
       :root {
         --bg-top: #f7efe2;
         --bg-bottom: #d6ebe4;
-        --panel: rgba(255, 252, 247, 0.86);
+        --panel: rgba(255, 252, 247, 0.88);
         --text: #182126;
         --accent: #0d6b66;
-        --muted: #5e6b73;
         --accent-strong: #0b4f4b;
+        --muted: #5e6b73;
         --shadow: rgba(24, 33, 38, 0.12);
       }
 
@@ -33,7 +33,7 @@
       }
 
       main {
-        width: min(92vw, 680px);
+        width: min(94vw, 860px);
         padding: 3rem;
         border: 1px solid rgba(24, 33, 38, 0.08);
         border-radius: 28px;
@@ -65,7 +65,7 @@
 
       h1 {
         margin: 0;
-        font-size: clamp(3rem, 12vw, 5rem);
+        font-size: clamp(2.8rem, 8vw, 4.8rem);
         line-height: 0.95;
         letter-spacing: -0.08em;
       }
@@ -76,14 +76,16 @@
         color: var(--muted);
       }
 
-      form {
-        margin-top: 2rem;
+      .panel {
+        margin-top: 1.6rem;
+        padding: 1.4rem;
+        border: 1px solid rgba(24, 33, 38, 0.08);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.56);
       }
 
-      label,
       .label {
-        display: block;
-        margin: 0 0 0.5rem;
+        margin: 0 0 0.8rem;
         font-size: 0.8rem;
         font-weight: 700;
         letter-spacing: 0.12em;
@@ -91,9 +93,23 @@
         color: var(--accent);
       }
 
+      #question-preview {
+        margin: 0;
+        padding-left: 1.2rem;
+        color: var(--text);
+      }
+
+      #question-preview li + li {
+        margin-top: 0.55rem;
+      }
+
+      form {
+        margin-top: 2rem;
+      }
+
       textarea {
         width: 100%;
-        min-height: 140px;
+        min-height: 120px;
         padding: 1rem 1.1rem;
         border: 1px solid rgba(24, 33, 38, 0.16);
         border-radius: 18px;
@@ -131,15 +147,25 @@
         font-size: 0.95rem;
       }
 
-      .response {
-        margin-top: 2rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid rgba(24, 33, 38, 0.1);
+      #answers {
+        display: grid;
+        gap: 1rem;
       }
 
-      #response-text {
+      .answer-card {
+        padding: 1.2rem 1.25rem;
+        border: 1px solid rgba(24, 33, 38, 0.08);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .answer-card h2 {
         margin: 0;
         font-size: 1.1rem;
+      }
+
+      .answer-card p {
+        margin-top: 0.8rem;
         color: var(--text);
         white-space: pre-wrap;
       }
@@ -148,48 +174,113 @@
   <body>
     <main>
       <nav class="nav" aria-label="Primary">
-        <a class="active" href="/">Chat</a>
+        <a class="active" href="/">Briefing</a>
         <a href="/config">Configuration</a>
       </nav>
 
-      <h1>Ask GPT-5.4</h1>
-      <p>Type a prompt, send it to the Python backend, and show the model response here.</p>
+      <h1>Journalism Briefing Desk</h1>
+      <p>Enter a topic or event. The app will answer the reporting questions configured on the settings page.</p>
 
-      <form id="chat-form">
-        <label for="query">Your Query</label>
-        <textarea id="query" name="query" placeholder="Write your prompt here..." required></textarea>
+      <section class="panel" aria-live="polite">
+        <p class="label">Configured Questions</p>
+        <ol id="question-preview">
+          <li>Loading configured reporting questions...</li>
+        </ol>
+      </section>
+
+      <form id="briefing-form">
+        <p class="label">Topic or Event</p>
+        <textarea
+          id="query"
+          name="query"
+          placeholder="Example: The latest developments in the ceasefire talks"
+          required
+        ></textarea>
 
         <div class="actions">
-          <button type="submit" id="send-button">Send</button>
+          <button type="submit" id="send-button">Build Briefing</button>
           <p id="status">Ready.</p>
         </div>
       </form>
 
-      <section class="response" aria-live="polite">
-        <p class="label">Response</p>
-        <p id="response-text">The model reply will appear here.</p>
+      <section class="panel" aria-live="polite">
+        <p class="label">Answers</p>
+        <div id="answers">
+          <div class="answer-card">
+            <h2>Waiting</h2>
+            <p>Your reporting brief will appear here.</p>
+          </div>
+        </div>
       </section>
     </main>
 
     <script>
-      const form = document.getElementById("chat-form");
+      const form = document.getElementById("briefing-form");
       const queryInput = document.getElementById("query");
       const sendButton = document.getElementById("send-button");
       const status = document.getElementById("status");
-      const responseText = document.getElementById("response-text");
+      const questionPreview = document.getElementById("question-preview");
+      const answers = document.getElementById("answers");
 
-      async function submitQuery(event) {
+      function renderQuestionPreview(questions) {
+        questionPreview.replaceChildren();
+
+        for (const question of questions) {
+          const item = document.createElement("li");
+          item.textContent = question;
+          questionPreview.appendChild(item);
+        }
+      }
+
+      function renderAnswers(items) {
+        answers.replaceChildren();
+
+        for (const item of items) {
+          const card = document.createElement("article");
+          card.className = "answer-card";
+
+          const heading = document.createElement("h2");
+          heading.textContent = item.question;
+
+          const body = document.createElement("p");
+          body.textContent = item.answer;
+
+          card.append(heading, body);
+          answers.appendChild(card);
+        }
+      }
+
+      async function loadConfig() {
+        try {
+          const response = await fetch("/api/config");
+          const payload = await response.json();
+
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          renderQuestionPreview(payload.questions);
+        } catch (error) {
+          questionPreview.replaceChildren();
+          const item = document.createElement("li");
+          item.textContent = `Could not load the configured questions: ${error.message}`;
+          questionPreview.appendChild(item);
+        }
+      }
+
+      async function submitBriefing(event) {
         event.preventDefault();
 
         const query = queryInput.value.trim();
         if (!query) {
-          status.textContent = "Enter a prompt first.";
+          status.textContent = "Enter a topic or event first.";
           return;
         }
 
+        const questionCount = questionPreview.children.length;
         sendButton.disabled = true;
-        status.textContent = "Sending...";
-        responseText.textContent = "Waiting for the model response...";
+        status.textContent = `Answering ${questionCount} reporting question(s)...`;
+        renderAnswers([{ question: "Working", answer: "The briefing is being generated." }]);
 
         try {
           const response = await fetch("/api/chat", {
@@ -205,17 +296,18 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          responseText.textContent = payload.response;
-          status.textContent = `Response received from ${payload.model}.`;
+          renderAnswers(payload.answers);
+          status.textContent = `Briefing generated with ${payload.model}.`;
         } catch (error) {
-          responseText.textContent = "The request failed.";
+          renderAnswers([{ question: "Request failed", answer: error.message }]);
           status.textContent = error.message;
         } finally {
           sendButton.disabled = false;
         }
       }
 
-      form.addEventListener("submit", submitQuery);
+      form.addEventListener("submit", submitBriefing);
+      loadConfig();
     </script>
   </body>
 </html>
