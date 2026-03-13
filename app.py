@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -18,6 +21,10 @@ OPENAI_MODELS_API_URL = "https://api.openai.com/v1/models"
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_PORT = "8000"
 CONFIG_KEYS = ("OPENAI_API_KEY", "OPENAI_MODEL", "PORT")
+RELOAD_ENV_VAR = "NEWS_ASSIST_RUN_SERVER"
+DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
+WATCHED_SUFFIXES = {".py"}
+IGNORED_DIRS = {".git", "__pycache__"}
 DEFAULT_REPORTING_QUESTIONS = [
     "What happened, in one clear summary?",
     "Who are the key people, organizations, or institutions involved?",
@@ -265,6 +272,84 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str
     return normalized_answers
 
 
+def iter_watched_files() -> list[Path]:
+    watched_files: list[Path] = []
+
+    for path in ROOT_DIR.rglob("*"):
+        if not path.is_file():
+            continue
+
+        relative_parts = path.relative_to(ROOT_DIR).parts
+        if any(part in IGNORED_DIRS for part in relative_parts):
+            continue
+
+        if path.suffix in WATCHED_SUFFIXES:
+            watched_files.append(path)
+
+    watched_files.sort()
+    return watched_files
+
+
+def take_watch_snapshot() -> dict[str, int]:
+    return {
+        str(path.relative_to(ROOT_DIR)): path.stat().st_mtime_ns
+        for path in iter_watched_files()
+    }
+
+
+def start_server_process() -> subprocess.Popen:
+    env = os.environ.copy()
+    env[RELOAD_ENV_VAR] = "1"
+
+    return subprocess.Popen([sys.executable, str(ROOT_DIR / "app.py")], cwd=str(ROOT_DIR), env=env)
+
+
+def stop_server_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def run_with_reloader() -> None:
+    snapshot = take_watch_snapshot()
+    process = start_server_process()
+    waiting_for_change = False
+    print(f"Watching {ROOT_DIR} for Python changes. Set {DISABLE_RELOAD_ENV_VAR}=1 to disable auto-reload.", flush=True)
+
+    try:
+        while True:
+            time.sleep(1)
+
+            if process.poll() is not None and not waiting_for_change:
+                print(
+                    f"Server exited with code {process.returncode}. Waiting for a Python file change before restart.",
+                    flush=True,
+                )
+                waiting_for_change = True
+
+            updated_snapshot = take_watch_snapshot()
+            if updated_snapshot == snapshot:
+                continue
+
+            snapshot = updated_snapshot
+            print("Python change detected. Restarting server...", flush=True)
+
+            if process.poll() is None:
+                stop_server_process(process)
+
+            process = start_server_process()
+            waiting_for_change = False
+    except KeyboardInterrupt:
+        stop_server_process(process)
+        print("\nStopped auto-reloading server.", flush=True)
+
+
 load_dotenv(ENV_FILE)
 ensure_local_reporting_config()
 
@@ -443,11 +528,19 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def main() -> None:
+def serve() -> None:
     port = int(current_port())
     server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
     print(f"Serving on http://127.0.0.1:{port}")
     server.serve_forever()
+
+
+def main() -> None:
+    if os.environ.get(RELOAD_ENV_VAR) == "1" or os.environ.get(DISABLE_RELOAD_ENV_VAR) == "1":
+        serve()
+        return
+
+    run_with_reloader()
 
 
 if __name__ == "__main__":
