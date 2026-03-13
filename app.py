@@ -273,6 +273,42 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, str
     return normalized_answers
 
 
+def normalize_highlights(raw_highlights: object) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    if not isinstance(raw_highlights, list):
+        return normalized
+
+    for item in raw_highlights:
+        if not isinstance(item, dict):
+            continue
+
+        question = str(item.get("question", "")).strip()
+        text = str(item.get("text", "")).strip()
+        if not question or not text:
+            continue
+
+        normalized.append({"question": question, "text": text})
+
+    return normalized
+
+
+def build_article_prompt(article_query: str, highlights: list[dict[str, str]]) -> str:
+    instruction = article_query.strip() or "Write a clear, publishable straight news article."
+    excerpt_block = "\n\n".join(
+        f"Excerpt {index}\nQuestion: {item['question']}\nText: {item['text']}"
+        for index, item in enumerate(highlights, start=1)
+    )
+
+    return (
+        "You are a newsroom writing assistant. Draft a news article using only the provided highlighted excerpts. "
+        "Do not add facts, quotes, attributions, dates, numbers, or context that are not explicitly present in the "
+        "highlights. If important facts are missing, leave them out rather than guessing. Write only the article text."
+        "\n\n"
+        f"Article request:\n{instruction}\n\n"
+        f"Highlighted excerpts:\n{excerpt_block}\n"
+    )
+
+
 def extract_web_search_sources(payload: dict[str, object]) -> list[dict[str, str]]:
     seen_urls: set[str] = set()
     sources: list[dict[str, str]] = []
@@ -421,6 +457,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._handle_briefing_request()
             return
 
+        if route == "/api/article":
+            self._handle_article_request()
+            return
+
         if route == "/api/config":
             self._handle_config_update()
             return
@@ -494,6 +534,61 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "topic": topic,
                 "answers": answers,
                 "sources": sources,
+            },
+        )
+
+    def _handle_article_request(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+
+        article_query = str(payload.get("article_query", "")).strip()
+        highlights = normalize_highlights(payload.get("highlights"))
+        if not highlights:
+            self._send_json(400, {"error": "Add at least one highlighted excerpt before drafting an article."})
+            return
+
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            self._send_json(500, {"error": "OPENAI_API_KEY is not set on the server."})
+            return
+
+        model = current_model()
+        request_body = json.dumps(
+            {"model": model, "input": build_article_prompt(article_query, highlights)}
+        ).encode("utf-8")
+        request = Request(
+            OPENAI_RESPONSES_API_URL,
+            data=request_body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        try:
+            with urlopen(request, timeout=60) as response:
+                upstream_payload = json.loads(response.read())
+        except HTTPError as error:
+            message = extract_openai_error_message(error.read())
+            self._send_json(error.code, {"error": message})
+            return
+        except URLError as error:
+            self._send_json(502, {"error": f"Could not reach OpenAI: {error.reason}"})
+            return
+
+        article = extract_output_text(upstream_payload)
+        if not article:
+            self._send_json(502, {"error": "OpenAI returned no article text."})
+            return
+
+        self._send_json(
+            200,
+            {
+                "model": model,
+                "article": article,
+                "highlight_count": len(highlights),
             },
         )
 

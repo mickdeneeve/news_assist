@@ -33,7 +33,7 @@
       }
 
       main {
-        width: min(94vw, 860px);
+        width: min(94vw, 960px);
         padding: 3rem;
         border: 1px solid rgba(24, 33, 38, 0.08);
         border-radius: 28px;
@@ -93,13 +93,16 @@
         color: var(--accent);
       }
 
-      #question-preview {
+      #question-preview,
+      #sources,
+      #highlights-list {
         margin: 0;
         padding-left: 1.2rem;
-        color: var(--text);
       }
 
-      #question-preview li + li {
+      #question-preview li + li,
+      #sources li + li,
+      #highlights-list li + li {
         margin-top: 0.55rem;
       }
 
@@ -137,12 +140,18 @@
         cursor: pointer;
       }
 
+      button.secondary {
+        background: rgba(24, 33, 38, 0.08);
+        color: var(--text);
+      }
+
       button:disabled {
         cursor: wait;
         opacity: 0.7;
       }
 
-      #status {
+      #status,
+      #article-status {
         margin: 0;
         font-size: 0.95rem;
       }
@@ -168,19 +177,78 @@
         margin-top: 0.8rem;
         color: var(--text);
         white-space: pre-wrap;
-      }
-
-      #sources {
-        margin: 0;
-        padding-left: 1.2rem;
-      }
-
-      #sources li + li {
-        margin-top: 0.55rem;
+        user-select: text;
       }
 
       #sources a {
         color: var(--accent-strong);
+      }
+
+      .selection-toolbar {
+        display: grid;
+        gap: 0.6rem;
+        margin-top: 1rem;
+        padding: 1rem 1.1rem;
+        border-radius: 18px;
+        background: rgba(13, 107, 102, 0.08);
+      }
+
+      #selection-preview {
+        margin: 0;
+        font-size: 0.98rem;
+        color: var(--text);
+      }
+
+      .highlight-meta {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      .highlight-item {
+        padding: 1rem 1.1rem;
+        border: 1px solid rgba(24, 33, 38, 0.08);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.68);
+        list-style: none;
+      }
+
+      .highlight-item p {
+        margin: 0.4rem 0 0;
+        color: var(--text);
+      }
+
+      .highlight-controls {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.8rem;
+        align-items: flex-start;
+      }
+
+      .highlight-controls button {
+        flex: 0 0 auto;
+      }
+
+      #article-draft {
+        margin: 0;
+        color: var(--text);
+        white-space: pre-wrap;
+      }
+
+      @media (max-width: 700px) {
+        main {
+          padding: 1.6rem;
+        }
+
+        .actions,
+        .highlight-controls {
+          flex-direction: column;
+          align-items: stretch;
+        }
       }
     </style>
   </head>
@@ -224,6 +292,15 @@
             <p>Your reporting brief will appear here.</p>
           </div>
         </div>
+
+        <div class="selection-toolbar">
+          <p class="label">Selected Passage</p>
+          <p id="selection-preview">Select part of an answer, then save it as a highlight.</p>
+          <div class="actions">
+            <button type="button" id="add-highlight" disabled>Add Highlight</button>
+            <button type="button" id="clear-selection" class="secondary">Clear Selection</button>
+          </div>
+        </div>
       </section>
 
       <section class="panel" aria-live="polite">
@@ -232,6 +309,35 @@
           <li>Web search sources will appear here after a briefing is generated.</li>
         </ol>
       </section>
+
+      <section class="panel" aria-live="polite">
+        <p class="label">Highlighted Excerpts</p>
+        <ol id="highlights-list">
+          <li>No highlights yet. Select part of an answer and add it here.</li>
+        </ol>
+        <div class="actions">
+          <button type="button" id="clear-highlights" class="secondary">Clear Highlights</button>
+        </div>
+      </section>
+
+      <form id="article-form" class="panel">
+        <p class="label">Article Query</p>
+        <textarea
+          id="article-query"
+          name="article_query"
+          placeholder="Example: Write a 500-word straight news article with a firm nut graf and no subheads."
+        ></textarea>
+
+        <div class="actions">
+          <button type="submit" id="article-button">Assemble Article</button>
+          <p id="article-status">Select highlighted excerpts, then draft the article.</p>
+        </div>
+
+        <div class="panel">
+          <p class="label">Drafted Article</p>
+          <p id="article-draft">The assembled article will appear here.</p>
+        </div>
+      </form>
     </main>
 
     <script>
@@ -243,6 +349,16 @@
       const questionPreview = document.getElementById("question-preview");
       const answers = document.getElementById("answers");
       const sources = document.getElementById("sources");
+      const selectionPreview = document.getElementById("selection-preview");
+      const addHighlightButton = document.getElementById("add-highlight");
+      const clearSelectionButton = document.getElementById("clear-selection");
+      const highlightsList = document.getElementById("highlights-list");
+      const clearHighlightsButton = document.getElementById("clear-highlights");
+      const articleForm = document.getElementById("article-form");
+      const articleQueryInput = document.getElementById("article-query");
+      const articleButton = document.getElementById("article-button");
+      const articleStatus = document.getElementById("article-status");
+      const articleDraft = document.getElementById("article-draft");
 
       function defaultBriefingState() {
         return {
@@ -251,6 +367,10 @@
           answers: [{ question: "Waiting", answer: "Your reporting brief will appear here." }],
           sources: [],
           hasBriefing: false,
+          highlights: [],
+          articleQuery: "",
+          articleStatus: "Select highlighted excerpts, then draft the article.",
+          articleDraft: "",
         };
       }
 
@@ -268,6 +388,13 @@
             answers: Array.isArray(parsed.answers) ? parsed.answers : defaultBriefingState().answers,
             sources: Array.isArray(parsed.sources) ? parsed.sources : [],
             hasBriefing: Boolean(parsed.hasBriefing),
+            highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
+            articleQuery: typeof parsed.articleQuery === "string" ? parsed.articleQuery : "",
+            articleStatus:
+              typeof parsed.articleStatus === "string"
+                ? parsed.articleStatus
+                : "Select highlighted excerpts, then draft the article.",
+            articleDraft: typeof parsed.articleDraft === "string" ? parsed.articleDraft : "",
           };
         } catch (error) {
           return defaultBriefingState();
@@ -275,6 +402,7 @@
       }
 
       let briefingState = loadBriefingState();
+      let pendingHighlight = null;
 
       function persistBriefingState() {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(briefingState));
@@ -283,6 +411,14 @@
       function updateBriefingState(updates) {
         briefingState = { ...briefingState, ...updates };
         persistBriefingState();
+      }
+
+      function resetArticleDraftState(message) {
+        updateBriefingState({
+          articleStatus: message,
+          articleDraft: "",
+        });
+        renderArticleDraft();
       }
 
       function renderQuestionPreview(questions) {
@@ -301,11 +437,13 @@
         for (const item of items) {
           const card = document.createElement("article");
           card.className = "answer-card";
+          card.dataset.question = item.question;
 
           const heading = document.createElement("h2");
           heading.textContent = item.question;
 
           const body = document.createElement("p");
+          body.className = "answer-text";
           body.textContent = item.answer;
 
           card.append(heading, body);
@@ -335,16 +473,128 @@
         }
       }
 
+      function renderHighlights() {
+        highlightsList.replaceChildren();
+
+        if (!briefingState.highlights.length) {
+          const item = document.createElement("li");
+          item.textContent = "No highlights yet. Select part of an answer and add it here.";
+          highlightsList.appendChild(item);
+          return;
+        }
+
+        briefingState.highlights.forEach((highlight, index) => {
+          const item = document.createElement("li");
+          item.className = "highlight-item";
+
+          const controls = document.createElement("div");
+          controls.className = "highlight-controls";
+
+          const textBlock = document.createElement("div");
+
+          const meta = document.createElement("span");
+          meta.className = "highlight-meta";
+          meta.textContent = highlight.question;
+
+          const body = document.createElement("p");
+          body.textContent = highlight.text;
+
+          textBlock.append(meta, body);
+
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "secondary";
+          removeButton.textContent = "Remove";
+          removeButton.addEventListener("click", () => {
+            const nextHighlights = briefingState.highlights.filter((_, itemIndex) => itemIndex !== index);
+            updateBriefingState({ highlights: nextHighlights });
+            renderHighlights();
+            resetArticleDraftState("Highlights updated. Draft the article again.");
+          });
+
+          controls.append(textBlock, removeButton);
+          item.appendChild(controls);
+          highlightsList.appendChild(item);
+        });
+      }
+
+      function renderArticleDraft() {
+        articleQueryInput.value = briefingState.articleQuery;
+        articleStatus.textContent = briefingState.articleStatus;
+        articleDraft.textContent = briefingState.articleDraft || "The assembled article will appear here.";
+      }
+
       function restoreBriefingState() {
         queryInput.value = briefingState.query;
         status.textContent = briefingState.status;
         renderAnswers(briefingState.answers);
+        renderHighlights();
+        renderArticleDraft();
 
         if (briefingState.hasBriefing) {
           renderSources(briefingState.sources);
         } else {
           renderSources([], "Web search sources will appear here after a briefing is generated.");
         }
+      }
+
+      function clearTextSelection() {
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+        }
+      }
+
+      function closestAnswerText(node) {
+        let current = node;
+        if (current && current.nodeType === Node.TEXT_NODE) {
+          current = current.parentElement;
+        }
+        return current && current.closest ? current.closest(".answer-text") : null;
+      }
+
+      function detectPendingHighlight() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+          return null;
+        }
+
+        const text = selection.toString().trim();
+        if (!text) {
+          return null;
+        }
+
+        const startText = closestAnswerText(selection.anchorNode);
+        const endText = closestAnswerText(selection.focusNode);
+        if (!startText || !endText || startText !== endText || !answers.contains(startText)) {
+          return null;
+        }
+
+        const answerCard = startText.closest(".answer-card[data-question]");
+        if (!answerCard) {
+          return null;
+        }
+
+        return {
+          question: answerCard.dataset.question,
+          text,
+        };
+      }
+
+      function renderPendingHighlight() {
+        if (!pendingHighlight) {
+          selectionPreview.textContent = "Select part of an answer, then save it as a highlight.";
+          addHighlightButton.disabled = true;
+          return;
+        }
+
+        selectionPreview.textContent = `${pendingHighlight.question}: "${pendingHighlight.text}"`;
+        addHighlightButton.disabled = false;
+      }
+
+      function refreshPendingHighlight() {
+        pendingHighlight = detectPendingHighlight();
+        renderPendingHighlight();
       }
 
       async function loadConfig() {
@@ -380,6 +630,8 @@
         status.textContent = `Answering ${questionCount} reporting question(s)...`;
         renderAnswers([{ question: "Working", answer: "The briefing is being generated." }]);
         renderSources([], "Web search sources will appear here after a briefing is generated.");
+        pendingHighlight = null;
+        renderPendingHighlight();
 
         try {
           const response = await fetch("/api/chat", {
@@ -404,7 +656,12 @@
             answers: payload.answers,
             sources: payload.sources || [],
             hasBriefing: true,
+            highlights: [],
+            articleStatus: "Select highlighted excerpts, then draft the article.",
+            articleDraft: "",
           });
+          renderHighlights();
+          renderArticleDraft();
         } catch (error) {
           const failedAnswers = [{ question: "Request failed", answer: error.message }];
           renderAnswers(failedAnswers);
@@ -416,18 +673,118 @@
             answers: failedAnswers,
             sources: [],
             hasBriefing: true,
+            highlights: [],
+            articleStatus: "Select highlighted excerpts, then draft the article.",
+            articleDraft: "",
           });
+          renderHighlights();
+          renderArticleDraft();
         } finally {
           sendButton.disabled = false;
         }
       }
 
+      async function submitArticle(event) {
+        event.preventDefault();
+
+        if (!briefingState.highlights.length) {
+          articleStatus.textContent = "Add at least one highlighted excerpt before drafting an article.";
+          updateBriefingState({ articleStatus: articleStatus.textContent });
+          return;
+        }
+
+        articleButton.disabled = true;
+        articleStatus.textContent = `Drafting article from ${briefingState.highlights.length} highlight(s)...`;
+
+        try {
+          const response = await fetch("/api/article", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              article_query: articleQueryInput.value.trim(),
+              highlights: briefingState.highlights,
+            }),
+          });
+
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          articleStatus.textContent = `Article drafted with ${payload.model} from ${payload.highlight_count} highlight(s).`;
+          articleDraft.textContent = payload.article;
+          updateBriefingState({
+            articleQuery: articleQueryInput.value,
+            articleStatus: articleStatus.textContent,
+            articleDraft: payload.article,
+          });
+        } catch (error) {
+          articleStatus.textContent = error.message;
+          articleDraft.textContent = "The assembled article will appear here.";
+          updateBriefingState({
+            articleQuery: articleQueryInput.value,
+            articleStatus: articleStatus.textContent,
+            articleDraft: "",
+          });
+        } finally {
+          articleButton.disabled = false;
+        }
+      }
+
+      addHighlightButton.addEventListener("click", () => {
+        if (!pendingHighlight) {
+          return;
+        }
+
+        const duplicate = briefingState.highlights.some(
+          (highlight) =>
+            highlight.question === pendingHighlight.question && highlight.text === pendingHighlight.text
+        );
+        if (duplicate) {
+          selectionPreview.textContent = "That highlight is already saved.";
+          return;
+        }
+
+        const nextHighlights = [...briefingState.highlights, pendingHighlight];
+        updateBriefingState({ highlights: nextHighlights });
+        renderHighlights();
+        resetArticleDraftState("Highlights updated. Draft the article again.");
+        pendingHighlight = null;
+        clearTextSelection();
+        renderPendingHighlight();
+      });
+
+      addHighlightButton.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+      });
+
+      clearSelectionButton.addEventListener("click", () => {
+        pendingHighlight = null;
+        clearTextSelection();
+        renderPendingHighlight();
+      });
+
+      clearHighlightsButton.addEventListener("click", () => {
+        updateBriefingState({ highlights: [] });
+        renderHighlights();
+        resetArticleDraftState("Select highlighted excerpts, then draft the article.");
+      });
+
       queryInput.addEventListener("input", () => {
         updateBriefingState({ query: queryInput.value });
       });
 
+      articleQueryInput.addEventListener("input", () => {
+        updateBriefingState({ articleQuery: articleQueryInput.value });
+      });
+
+      document.addEventListener("selectionchange", refreshPendingHighlight);
       form.addEventListener("submit", submitBriefing);
+      articleForm.addEventListener("submit", submitArticle);
       restoreBriefingState();
+      renderPendingHighlight();
       loadConfig();
     </script>
   </body>
