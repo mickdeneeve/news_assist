@@ -38,6 +38,8 @@ DEFAULT_ARTICLE_QUERY = (
     "and the more specific stuff after."
 )
 DEFAULT_ARTICLE_WORD_COUNT = 300
+DEFAULT_ARTICLE_SELECTION_MODE = "exclude"
+ARTICLE_SELECTION_MODES = {"include", "exclude"}
 ARTICLE_WORD_PLACEHOLDER = "N"
 URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 
@@ -125,6 +127,7 @@ def default_reporting_config() -> dict[str, object]:
         "questions": DEFAULT_REPORTING_QUESTIONS.copy(),
         "article_query": DEFAULT_ARTICLE_QUERY,
         "article_word_count": DEFAULT_ARTICLE_WORD_COUNT,
+        "article_selection_mode": DEFAULT_ARTICLE_SELECTION_MODE,
     }
 
 
@@ -153,6 +156,11 @@ def normalize_article_word_count(raw_count: object) -> int:
         return DEFAULT_ARTICLE_WORD_COUNT
 
     return count if count > 0 else DEFAULT_ARTICLE_WORD_COUNT
+
+
+def normalize_article_selection_mode(raw_mode: object) -> str:
+    mode = str(raw_mode or "").strip().lower()
+    return mode if mode in ARTICLE_SELECTION_MODES else DEFAULT_ARTICLE_SELECTION_MODE
 
 
 def render_article_query(article_query: str, word_count: int) -> str:
@@ -191,11 +199,13 @@ def read_reporting_config(path: Path) -> dict[str, object]:
 
     article_query = normalize_article_query(payload.get("article_query"))
     article_word_count = normalize_article_word_count(payload.get("article_word_count"))
+    article_selection_mode = normalize_article_selection_mode(payload.get("article_selection_mode"))
 
     return {
         "questions": questions,
         "article_query": article_query,
         "article_word_count": article_word_count,
+        "article_selection_mode": article_selection_mode,
     }
 
 
@@ -204,11 +214,13 @@ def write_reporting_config(
     questions: list[str],
     article_query: str,
     article_word_count: int,
+    article_selection_mode: str,
 ) -> None:
     payload = {
         "questions": questions,
         "article_query": normalize_article_query(article_query),
         "article_word_count": normalize_article_word_count(article_word_count),
+        "article_selection_mode": normalize_article_selection_mode(article_selection_mode),
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -222,6 +234,7 @@ def ensure_local_reporting_config() -> None:
         DEFAULT_REPORTING_QUESTIONS.copy(),
         DEFAULT_ARTICLE_QUERY,
         DEFAULT_ARTICLE_WORD_COUNT,
+        DEFAULT_ARTICLE_SELECTION_MODE,
     )
 
 
@@ -416,12 +429,12 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, obj
     return normalized_answers
 
 
-def normalize_highlights(raw_highlights: object) -> list[dict[str, str]]:
+def normalize_article_excerpts(raw_excerpts: object) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
-    if not isinstance(raw_highlights, list):
+    if not isinstance(raw_excerpts, list):
         return normalized
 
-    for item in raw_highlights:
+    for item in raw_excerpts:
         if not isinstance(item, dict):
             continue
 
@@ -435,20 +448,20 @@ def normalize_highlights(raw_highlights: object) -> list[dict[str, str]]:
     return normalized
 
 
-def build_article_prompt(article_query: str, highlights: list[dict[str, str]]) -> str:
+def build_article_prompt(article_query: str, excerpts: list[dict[str, str]]) -> str:
     instruction = article_query.strip() or "Write a clear, publishable straight news article."
     excerpt_block = "\n\n".join(
         f"Excerpt {index}\nQuestion: {item['question']}\nText: {item['text']}"
-        for index, item in enumerate(highlights, start=1)
+        for index, item in enumerate(excerpts, start=1)
     )
 
     return (
-        "You are a newsroom writing assistant. Draft a news article using only the provided highlighted excerpts. "
+        "You are a newsroom writing assistant. Draft a news article using only the provided source excerpts. "
         "Do not add facts, quotes, attributions, dates, numbers, or context that are not explicitly present in the "
-        "highlights. If important facts are missing, leave them out rather than guessing. Write only the article text."
+        "excerpts. If important facts are missing, leave them out rather than guessing. Write only the article text."
         "\n\n"
         f"Article request:\n{instruction}\n\n"
-        f"Highlighted excerpts:\n{excerpt_block}\n"
+        f"Source excerpts:\n{excerpt_block}\n"
     )
 
 
@@ -690,9 +703,13 @@ class AppHandler(SimpleHTTPRequestHandler):
             str(reporting_config["article_query"]),
             int(reporting_config["article_word_count"]),
         )
-        highlights = normalize_highlights(payload.get("highlights"))
-        if not highlights:
-            self._send_json(400, {"error": "Add at least one highlighted excerpt before drafting an article."})
+        article_selection_mode = normalize_article_selection_mode(reporting_config["article_selection_mode"])
+        excerpts = normalize_article_excerpts(payload.get("excerpts"))
+        if not excerpts:
+            excerpts = normalize_article_excerpts(payload.get("highlights"))
+
+        if not excerpts:
+            self._send_json(400, {"error": "No usable briefing text was provided for article drafting."})
             return
 
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -702,7 +719,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         model = current_model()
         request_body = json.dumps(
-            {"model": model, "input": build_article_prompt(article_query, highlights)}
+            {"model": model, "input": build_article_prompt(article_query, excerpts)}
         ).encode("utf-8")
         request = Request(
             OPENAI_RESPONSES_API_URL,
@@ -735,9 +752,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             {
                 "model": model,
                 "article": article,
-                "highlight_count": len(highlights),
+                "excerpt_count": len(excerpts),
                 "article_query": article_query,
                 "article_word_count": reporting_config["article_word_count"],
+                "article_selection_mode": article_selection_mode,
             },
         )
 
@@ -769,9 +787,17 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"error": "Article word count must be greater than zero."})
             return
 
+        article_selection_mode = normalize_article_selection_mode(payload.get("article_selection_mode"))
+
         write_env_file(ENV_FILE, {"OPENAI_MODEL": model})
         os.environ["OPENAI_MODEL"] = model
-        write_reporting_config(REPORTING_CONFIG_FILE, questions, article_query, article_word_count)
+        write_reporting_config(
+            REPORTING_CONFIG_FILE,
+            questions,
+            article_query,
+            article_word_count,
+            article_selection_mode,
+        )
 
         response_payload = self._config_payload()
         response_payload["message"] = "Configuration saved."
@@ -807,6 +833,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             "questions": reporting_config["questions"],
             "article_query": reporting_config["article_query"],
             "article_word_count": reporting_config["article_word_count"],
+            "article_selection_mode": reporting_config["article_selection_mode"],
             "resolved_article_query": render_article_query(
                 str(reporting_config["article_query"]),
                 int(reporting_config["article_word_count"]),

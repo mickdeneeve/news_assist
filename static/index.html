@@ -220,12 +220,19 @@
       }
 
       .answer-highlight {
-        background: #ffe66a;
         color: inherit;
         padding: 0.04em 0.08em;
         border-radius: 0.18em;
         box-decoration-break: clone;
         -webkit-box-decoration-break: clone;
+      }
+
+      .answer-highlight-include {
+        background: #ffe66a;
+      }
+
+      .answer-highlight-exclude {
+        background: #f6b1b1;
       }
 
       .highlight-meta {
@@ -244,6 +251,16 @@
         border-radius: 18px;
         background: rgba(255, 255, 255, 0.68);
         list-style: none;
+      }
+
+      .highlight-item-include {
+        border-color: rgba(168, 116, 0, 0.18);
+        background: rgba(255, 246, 196, 0.72);
+      }
+
+      .highlight-item-exclude {
+        border-color: rgba(185, 28, 28, 0.16);
+        background: rgba(255, 236, 236, 0.82);
       }
 
       .highlight-item p {
@@ -333,7 +350,7 @@
         </div>
 
         <p id="highlight-note" class="highlight-note">
-          Select text in any answer to apply a persistent yellow highlight. Those highlights feed the article draft.
+          Select text in any answer to exclude it from the article. Excluded passages are marked in red.
         </p>
       </section>
 
@@ -345,12 +362,12 @@
       </section>
 
       <section class="panel" aria-live="polite">
-        <p class="label">Highlighted Excerpts</p>
+        <p id="selections-label" class="label">Excluded Excerpts</p>
         <ol id="highlights-list">
-          <li>No highlights yet. Select text in an answer to add one.</li>
+          <li>No excluded passages yet. Select text in an answer to remove it from the article.</li>
         </ol>
         <div class="actions">
-          <button type="button" id="clear-highlights" class="secondary">Clear Highlights</button>
+          <button type="button" id="clear-highlights" class="secondary">Clear Selections</button>
         </div>
       </section>
 
@@ -362,7 +379,7 @@
 
         <div class="actions">
           <button type="submit" id="article-button">Assemble Article</button>
-          <p id="article-status">Select highlighted excerpts, then draft the article.</p>
+          <p id="article-status">Draft the article from the current briefing text, or mark passages in red to exclude them first.</p>
         </div>
 
         <div class="panel">
@@ -382,6 +399,7 @@
       const answers = document.getElementById("answers");
       const sources = document.getElementById("sources");
       const highlightNote = document.getElementById("highlight-note");
+      const selectionsLabel = document.getElementById("selections-label");
       const highlightsList = document.getElementById("highlights-list");
       const clearHighlightsButton = document.getElementById("clear-highlights");
       const articleForm = document.getElementById("article-form");
@@ -389,12 +407,52 @@
       const articleButton = document.getElementById("article-button");
       const articleStatus = document.getElementById("article-status");
       const articleDraft = document.getElementById("article-draft");
-      const DEFAULT_ARTICLE_STATUS = "Select highlighted excerpts, then draft the article.";
-      const DEFAULT_HIGHLIGHT_NOTE =
-        "Select text in any answer to apply a persistent yellow highlight. Those highlights feed the article draft.";
+      const DEFAULT_ARTICLE_SELECTION_MODE = "exclude";
       const DEFAULT_ARTICLE_CONFIG_NOTE =
         "Loading the configured article request from the configuration page...";
       const URL_PATTERN = /https?:\/\/[^\s<>()]+/gi;
+
+      function normalizeSelectionMode(value) {
+        return value === "include" ? "include" : DEFAULT_ARTICLE_SELECTION_MODE;
+      }
+
+      function selectionModeHeading(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include" ? "Included Excerpts" : "Excluded Excerpts";
+      }
+
+      function selectionModeEmptyMessage(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include"
+          ? "No included passages yet. Select text in an answer to use it in the article."
+          : "No excluded passages yet. Select text in an answer to remove it from the article.";
+      }
+
+      function selectionModeNote(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include"
+          ? "Select text in any answer to include it in the article. Included passages are marked in yellow."
+          : "Select text in any answer to exclude it from the article. Excluded passages are marked in red.";
+      }
+
+      function selectionModeDescription(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include"
+          ? "Only the selected yellow passages will be used to assemble the article."
+          : "Selected red passages will be removed before the article is assembled.";
+      }
+
+      function selectionModePastTense(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include" ? "included" : "excluded";
+      }
+
+      function selectionModeDuplicateMessage(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include"
+          ? "That passage is already included."
+          : "That passage is already excluded.";
+      }
+
+      function defaultArticleStatus(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include"
+          ? "Select passages to include, then draft the article."
+          : "Draft the article from the current briefing text, or mark passages in red to exclude them first.";
+      }
 
       function extractUrls(text) {
         const matches = String(text || "").match(URL_PATTERN) || [];
@@ -495,7 +553,8 @@
           sources: [],
           hasBriefing: false,
           highlights: [],
-          articleStatus: DEFAULT_ARTICLE_STATUS,
+          selectionMode: DEFAULT_ARTICLE_SELECTION_MODE,
+          articleStatus: defaultArticleStatus(DEFAULT_ARTICLE_SELECTION_MODE),
           articleDraft: "",
         };
       }
@@ -515,10 +574,11 @@
             sources: Array.isArray(parsed.sources) ? parsed.sources : [],
             hasBriefing: Boolean(parsed.hasBriefing),
             highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
+            selectionMode: normalizeSelectionMode(parsed.selectionMode),
             articleStatus:
               typeof parsed.articleStatus === "string"
                 ? parsed.articleStatus
-                : DEFAULT_ARTICLE_STATUS,
+                : defaultArticleStatus(normalizeSelectionMode(parsed.selectionMode)),
             articleDraft: typeof parsed.articleDraft === "string" ? parsed.articleDraft : "",
           };
         } catch (error) {
@@ -546,7 +606,7 @@
         renderArticleDraft();
       }
 
-      function renderHighlightNote(message = DEFAULT_HIGHLIGHT_NOTE, autoReset = false) {
+      function renderHighlightNote(message = selectionModeNote(briefingState.selectionMode), autoReset = false) {
         highlightNote.textContent = message;
         if (highlightNoteTimer) {
           window.clearTimeout(highlightNoteTimer);
@@ -555,7 +615,7 @@
 
         if (autoReset) {
           highlightNoteTimer = window.setTimeout(() => {
-            highlightNote.textContent = DEFAULT_HIGHLIGHT_NOTE;
+            highlightNote.textContent = selectionModeNote(briefingState.selectionMode);
             highlightNoteTimer = null;
           }, 1800);
         }
@@ -659,6 +719,7 @@
       briefingState = {
         ...briefingState,
         answers: normalizeAnswerItems(briefingState.answers),
+        selectionMode: normalizeSelectionMode(briefingState.selectionMode),
         highlights: normalizeStoredHighlights(briefingState.highlights, briefingState.answers),
       };
       persistBriefingState();
@@ -682,7 +743,7 @@
           }
 
           const mark = document.createElement("mark");
-          mark.className = "answer-highlight";
+          mark.className = `answer-highlight answer-highlight-${briefingState.selectionMode}`;
           mark.textContent = answerText.slice(highlight.start, highlight.end);
           fragment.appendChild(mark);
           cursor = highlight.end;
@@ -775,18 +836,19 @@
       }
 
       function renderHighlights() {
+        selectionsLabel.textContent = selectionModeHeading(briefingState.selectionMode);
         highlightsList.replaceChildren();
 
         if (!briefingState.highlights.length) {
           const item = document.createElement("li");
-          item.textContent = "No highlights yet. Select text in an answer to add one.";
+          item.textContent = selectionModeEmptyMessage(briefingState.selectionMode);
           highlightsList.appendChild(item);
           return;
         }
 
         briefingState.highlights.forEach((highlight, index) => {
           const item = document.createElement("li");
-          item.className = "highlight-item";
+          item.className = `highlight-item highlight-item-${briefingState.selectionMode}`;
 
           const controls = document.createElement("div");
           controls.className = "highlight-controls";
@@ -811,7 +873,7 @@
             updateBriefingState({ highlights: nextHighlights });
             renderAnswers(briefingState.answers);
             renderHighlights();
-            resetArticleDraftState("Highlights updated. Draft the article again.");
+            resetArticleDraftState(defaultArticleStatus(briefingState.selectionMode));
             renderHighlightNote();
           });
 
@@ -826,10 +888,14 @@
         articleDraft.textContent = briefingState.articleDraft || "The assembled article will appear here.";
       }
 
-      function renderArticleConfig(note = DEFAULT_ARTICLE_CONFIG_NOTE) {
+      function renderArticleConfig(
+        query = DEFAULT_ARTICLE_CONFIG_NOTE,
+        selectionMode = briefingState.selectionMode
+      ) {
         articleConfigNote.replaceChildren();
 
-        const text = document.createTextNode(`${note} `);
+        const summary = `${selectionModeDescription(selectionMode)} Article request: ${query}`;
+        const text = document.createTextNode(`${summary} `);
         const link = document.createElement("a");
         link.href = "/config";
         link.textContent = "Edit this on the configuration page.";
@@ -942,8 +1008,51 @@
         });
         renderAnswers(briefingState.answers);
         renderHighlights();
-        resetArticleDraftState("Highlights updated. Draft the article again.");
+        resetArticleDraftState(defaultArticleStatus(briefingState.selectionMode));
         return true;
+      }
+
+      function buildArticleExcerpts() {
+        if (briefingState.selectionMode === "include") {
+          return briefingState.highlights.map((highlight) => ({
+            question: highlight.question,
+            text: highlight.text,
+          }));
+        }
+
+        const excerpts = [];
+
+        briefingState.answers.forEach((answerItem) => {
+          const answerText = String(answerItem.answer || "");
+          if (!answerText.trim()) {
+            return;
+          }
+
+          const exclusions = briefingState.highlights
+            .filter((highlight) => highlight.question === answerItem.question)
+            .sort((left, right) => left.start - right.start || left.end - right.end);
+
+          if (!exclusions.length) {
+            excerpts.push({ question: answerItem.question, text: answerText.trim() });
+            return;
+          }
+
+          let cursor = 0;
+          for (const exclusion of exclusions) {
+            const chunk = answerText.slice(cursor, exclusion.start).trim();
+            if (chunk) {
+              excerpts.push({ question: answerItem.question, text: chunk });
+            }
+            cursor = exclusion.end;
+          }
+
+          const tail = answerText.slice(cursor).trim();
+          if (tail) {
+            excerpts.push({ question: answerItem.question, text: tail });
+          }
+        });
+
+        return excerpts;
       }
 
       function applySelectionHighlight() {
@@ -955,7 +1064,9 @@
         const didStore = storeSelectedHighlight(highlight);
         clearTextSelection();
         renderHighlightNote(
-          didStore ? "Highlight added." : "That passage is already highlighted.",
+          didStore
+            ? `Passage ${selectionModePastTense(briefingState.selectionMode)}.`
+            : selectionModeDuplicateMessage(briefingState.selectionMode),
           true
         );
       }
@@ -969,14 +1080,40 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
+          const nextSelectionMode = normalizeSelectionMode(payload.article_selection_mode);
+          const selectionModeChanged = briefingState.selectionMode !== nextSelectionMode;
+          const nextState = { selectionMode: nextSelectionMode };
+          if (selectionModeChanged) {
+            nextState.highlights = [];
+            nextState.articleStatus = defaultArticleStatus(nextSelectionMode);
+            nextState.articleDraft = "";
+          }
+          updateBriefingState(nextState);
           renderQuestionPreview(payload.questions);
-          renderArticleConfig(payload.resolved_article_query || DEFAULT_ARTICLE_CONFIG_NOTE);
+          renderAnswers(briefingState.answers);
+          renderHighlights();
+          renderArticleDraft();
+          renderHighlightNote();
+          renderArticleConfig(
+            payload.resolved_article_query || DEFAULT_ARTICLE_CONFIG_NOTE,
+            nextSelectionMode
+          );
+
+          if (selectionModeChanged) {
+            renderHighlightNote(
+              `${selectionModeHeading(nextSelectionMode)} mode loaded. Previous selections were cleared.`,
+              true
+            );
+          }
         } catch (error) {
           questionPreview.replaceChildren();
           const item = document.createElement("li");
           item.textContent = `Could not load the configured questions: ${error.message}`;
           questionPreview.appendChild(item);
-          renderArticleConfig(`Could not load the configured article request: ${error.message}.`);
+          renderArticleConfig(
+            `Could not load the configured article request: ${error.message}.`,
+            briefingState.selectionMode
+          );
         }
       }
 
@@ -998,7 +1135,7 @@
         renderHighlightNote();
         updateBriefingState({
           highlights: [],
-          articleStatus: DEFAULT_ARTICLE_STATUS,
+          articleStatus: defaultArticleStatus(briefingState.selectionMode),
           articleDraft: "",
         });
         renderHighlights();
@@ -1027,7 +1164,7 @@
             sources: payload.sources || [],
             hasBriefing: true,
             highlights: [],
-            articleStatus: DEFAULT_ARTICLE_STATUS,
+            articleStatus: defaultArticleStatus(briefingState.selectionMode),
             articleDraft: "",
           });
           renderAnswers(briefingState.answers);
@@ -1046,7 +1183,7 @@
             sources: [],
             hasBriefing: true,
             highlights: [],
-            articleStatus: DEFAULT_ARTICLE_STATUS,
+            articleStatus: defaultArticleStatus(briefingState.selectionMode),
             articleDraft: "",
           });
           renderAnswers(briefingState.answers);
@@ -1061,14 +1198,28 @@
       async function submitArticle(event) {
         event.preventDefault();
 
-        if (!briefingState.highlights.length) {
-          articleStatus.textContent = "Add at least one highlighted excerpt before drafting an article.";
+        const excerpts = buildArticleExcerpts();
+
+        if (briefingState.selectionMode === "include" && !briefingState.highlights.length) {
+          articleStatus.textContent = "Select at least one yellow passage to include before drafting an article.";
+          updateBriefingState({ articleStatus: articleStatus.textContent });
+          return;
+        }
+
+        if (!excerpts.length) {
+          articleStatus.textContent =
+            briefingState.selectionMode === "exclude"
+              ? "All briefing text is currently excluded. Clear some red selections before drafting an article."
+              : "No usable excerpt text is available for article drafting.";
           updateBriefingState({ articleStatus: articleStatus.textContent });
           return;
         }
 
         articleButton.disabled = true;
-        articleStatus.textContent = `Drafting article from ${briefingState.highlights.length} highlight(s)...`;
+        articleStatus.textContent =
+          briefingState.selectionMode === "include"
+            ? `Drafting article from ${excerpts.length} included excerpt(s)...`
+            : `Drafting article from ${excerpts.length} remaining excerpt(s)...`;
 
         try {
           const response = await fetch("/api/article", {
@@ -1077,7 +1228,7 @@
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              highlights: briefingState.highlights,
+              excerpts,
             }),
           });
 
@@ -1086,10 +1237,10 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          articleStatus.textContent = `Article drafted with ${payload.model} from ${payload.highlight_count} highlight(s).`;
+          articleStatus.textContent = `Article drafted with ${payload.model} from ${payload.excerpt_count} source excerpt(s).`;
           articleDraft.textContent = payload.article;
           if (payload.article_query) {
-            renderArticleConfig(payload.article_query);
+            renderArticleConfig(payload.article_query, payload.article_selection_mode || briefingState.selectionMode);
           }
           updateBriefingState({
             articleStatus: articleStatus.textContent,
@@ -1111,7 +1262,7 @@
         updateBriefingState({ highlights: [] });
         renderAnswers(briefingState.answers);
         renderHighlights();
-        resetArticleDraftState(DEFAULT_ARTICLE_STATUS);
+        resetArticleDraftState(defaultArticleStatus(briefingState.selectionMode));
         renderHighlightNote();
       });
 

@@ -200,7 +200,7 @@
       </nav>
 
       <h1>Briefing Configuration</h1>
-      <p>Choose the OpenAI model, define the reporting questions, and set the default article request used to turn highlights into a draft.</p>
+      <p>Choose the OpenAI model, define the reporting questions, and set how article drafting should treat selected passages.</p>
 
       <form id="config-form">
         <section class="field">
@@ -236,6 +236,17 @@
           <p class="hint" id="article-preview">Loading article request preview...</p>
         </section>
 
+        <section class="field">
+          <label for="article-selection-mode">Article Selection Mode</label>
+          <select id="article-selection-mode" name="article_selection_mode" required>
+            <option value="exclude">Exclude in red</option>
+            <option value="include">Include in yellow</option>
+          </select>
+          <p class="hint" id="selection-mode-hint">
+            In exclude mode, selected text is removed from the source material used for the article.
+          </p>
+        </section>
+
         <div class="actions">
           <button id="save-button" class="save-button" type="submit">Save Configuration</button>
           <p id="status">Loading current configuration...</p>
@@ -251,6 +262,8 @@
       const articleQueryInput = document.getElementById("article-query");
       const articleWordCountInput = document.getElementById("article-word-count");
       const articlePreview = document.getElementById("article-preview");
+      const articleSelectionModeInput = document.getElementById("article-selection-mode");
+      const selectionModeHint = document.getElementById("selection-mode-hint");
       const addQuestionButton = document.getElementById("add-question");
       const saveButton = document.getElementById("save-button");
       const status = document.getElementById("status");
@@ -321,6 +334,17 @@
         return Number.isFinite(count) && count > 0 ? count : 300;
       }
 
+      function normalizeSelectionMode(value) {
+        return value === "include" ? "include" : "exclude";
+      }
+
+      function renderSelectionModeHint() {
+        selectionModeHint.textContent =
+          normalizeSelectionMode(articleSelectionModeInput.value) === "include"
+            ? "In include mode, only the selected yellow passages will be used to build the article."
+            : "In exclude mode, selected text is marked in red and removed from the source material used for the article.";
+      }
+
       function renderArticlePreview() {
         const wordCount = normalizeArticleWordCount(articleWordCountInput.value);
         const articleQuery = articleQueryInput.value.trim();
@@ -353,7 +377,9 @@
           renderQuestions(payload.questions);
           articleQueryInput.value = payload.article_query;
           articleWordCountInput.value = payload.article_word_count;
+          articleSelectionModeInput.value = normalizeSelectionMode(payload.article_selection_mode);
           renderArticlePreview();
+          renderSelectionModeHint();
 
           modelHint.textContent = payload.models_error
             ? `Live model list unavailable: ${payload.models_error}`
@@ -393,6 +419,7 @@
               questions,
               article_query: articleQueryInput.value.trim(),
               article_word_count: normalizeArticleWordCount(articleWordCountInput.value),
+              article_selection_mode: normalizeSelectionMode(articleSelectionModeInput.value),
             }),
           });
 
@@ -405,7 +432,9 @@
           renderQuestions(payload.questions);
           articleQueryInput.value = payload.article_query;
           articleWordCountInput.value = payload.article_word_count;
+          articleSelectionModeInput.value = normalizeSelectionMode(payload.article_selection_mode);
           renderArticlePreview();
+          renderSelectionModeHint();
 
           modelHint.textContent = payload.models_error
             ? `Live model list unavailable: ${payload.models_error}`
@@ -422,6 +451,7 @@
       addQuestionButton.addEventListener("click", () => addQuestionRow());
       articleQueryInput.addEventListener("input", renderArticlePreview);
       articleWordCountInput.addEventListener("input", renderArticlePreview);
+      articleSelectionModeInput.addEventListener("change", renderSelectionModeHint);
       form.addEventListener("submit", saveConfig);
       loadConfig();
     </script>
