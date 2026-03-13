@@ -268,6 +268,16 @@
         white-space: pre-wrap;
       }
 
+      .article-config-note {
+        margin: 0 0 1rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .article-config-note a {
+        color: var(--accent-strong);
+      }
+
       @media (max-width: 700px) {
         main {
           padding: 1.6rem;
@@ -345,12 +355,10 @@
       </section>
 
       <form id="article-form" class="panel">
-        <p class="label">Article Query</p>
-        <textarea
-          id="article-query"
-          name="article_query"
-          placeholder="Example: Write a 500-word straight news article with a firm nut graf and no subheads."
-        ></textarea>
+        <p class="label">Configured Article Request</p>
+        <p id="article-config-note" class="article-config-note">
+          Loading the configured article request from the configuration page...
+        </p>
 
         <div class="actions">
           <button type="submit" id="article-button">Assemble Article</button>
@@ -377,13 +385,15 @@
       const highlightsList = document.getElementById("highlights-list");
       const clearHighlightsButton = document.getElementById("clear-highlights");
       const articleForm = document.getElementById("article-form");
-      const articleQueryInput = document.getElementById("article-query");
+      const articleConfigNote = document.getElementById("article-config-note");
       const articleButton = document.getElementById("article-button");
       const articleStatus = document.getElementById("article-status");
       const articleDraft = document.getElementById("article-draft");
       const DEFAULT_ARTICLE_STATUS = "Select highlighted excerpts, then draft the article.";
       const DEFAULT_HIGHLIGHT_NOTE =
         "Select text in any answer to apply a persistent yellow highlight. Those highlights feed the article draft.";
+      const DEFAULT_ARTICLE_CONFIG_NOTE =
+        "Loading the configured article request from the configuration page...";
       const URL_PATTERN = /https?:\/\/[^\s<>()]+/gi;
 
       function extractUrls(text) {
@@ -485,7 +495,6 @@
           sources: [],
           hasBriefing: false,
           highlights: [],
-          articleQuery: "",
           articleStatus: DEFAULT_ARTICLE_STATUS,
           articleDraft: "",
         };
@@ -506,7 +515,6 @@
             sources: Array.isArray(parsed.sources) ? parsed.sources : [],
             hasBriefing: Boolean(parsed.hasBriefing),
             highlights: Array.isArray(parsed.highlights) ? parsed.highlights : [],
-            articleQuery: typeof parsed.articleQuery === "string" ? parsed.articleQuery : "",
             articleStatus:
               typeof parsed.articleStatus === "string"
                 ? parsed.articleStatus
@@ -814,9 +822,19 @@
       }
 
       function renderArticleDraft() {
-        articleQueryInput.value = briefingState.articleQuery;
         articleStatus.textContent = briefingState.articleStatus;
         articleDraft.textContent = briefingState.articleDraft || "The assembled article will appear here.";
+      }
+
+      function renderArticleConfig(note = DEFAULT_ARTICLE_CONFIG_NOTE) {
+        articleConfigNote.replaceChildren();
+
+        const text = document.createTextNode(`${note} `);
+        const link = document.createElement("a");
+        link.href = "/config";
+        link.textContent = "Edit this on the configuration page.";
+
+        articleConfigNote.append(text, link);
       }
 
       function restoreBriefingState() {
@@ -826,6 +844,7 @@
         renderHighlights();
         renderArticleDraft();
         renderHighlightNote();
+        renderArticleConfig();
 
         if (briefingState.hasBriefing) {
           renderSources(briefingState.sources);
@@ -951,11 +970,13 @@
           }
 
           renderQuestionPreview(payload.questions);
+          renderArticleConfig(payload.resolved_article_query || DEFAULT_ARTICLE_CONFIG_NOTE);
         } catch (error) {
           questionPreview.replaceChildren();
           const item = document.createElement("li");
           item.textContent = `Could not load the configured questions: ${error.message}`;
           questionPreview.appendChild(item);
+          renderArticleConfig(`Could not load the configured article request: ${error.message}.`);
         }
       }
 
@@ -1056,7 +1077,6 @@
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              article_query: articleQueryInput.value.trim(),
               highlights: briefingState.highlights,
             }),
           });
@@ -1068,8 +1088,10 @@
 
           articleStatus.textContent = `Article drafted with ${payload.model} from ${payload.highlight_count} highlight(s).`;
           articleDraft.textContent = payload.article;
+          if (payload.article_query) {
+            renderArticleConfig(payload.article_query);
+          }
           updateBriefingState({
-            articleQuery: articleQueryInput.value,
             articleStatus: articleStatus.textContent,
             articleDraft: payload.article,
           });
@@ -1077,7 +1099,6 @@
           articleStatus.textContent = error.message;
           articleDraft.textContent = "The assembled article will appear here.";
           updateBriefingState({
-            articleQuery: articleQueryInput.value,
             articleStatus: articleStatus.textContent,
             articleDraft: "",
           });
@@ -1096,10 +1117,6 @@
 
       queryInput.addEventListener("input", () => {
         updateBriefingState({ query: queryInput.value });
-      });
-
-      articleQueryInput.addEventListener("input", () => {
-        updateBriefingState({ articleQuery: articleQueryInput.value });
       });
 
       document.addEventListener("pointerup", () => {

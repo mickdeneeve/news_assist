@@ -33,6 +33,12 @@ DEFAULT_REPORTING_QUESTIONS = [
     "What context or background does a reader need?",
     "What remains unknown, disputed, or unverified?",
 ]
+DEFAULT_ARTICLE_QUERY = (
+    "Write a news article of around N words. It should have the most general information first, "
+    "and the more specific stuff after."
+)
+DEFAULT_ARTICLE_WORD_COUNT = 300
+ARTICLE_WORD_PLACEHOLDER = "N"
 URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 
 
@@ -114,8 +120,12 @@ def current_port() -> str:
     return os.environ.get("PORT", DEFAULT_PORT).strip() or DEFAULT_PORT
 
 
-def default_reporting_config() -> dict[str, list[str]]:
-    return {"questions": DEFAULT_REPORTING_QUESTIONS.copy()}
+def default_reporting_config() -> dict[str, object]:
+    return {
+        "questions": DEFAULT_REPORTING_QUESTIONS.copy(),
+        "article_query": DEFAULT_ARTICLE_QUERY,
+        "article_word_count": DEFAULT_ARTICLE_WORD_COUNT,
+    }
 
 
 def normalize_questions(raw_questions: object) -> list[str]:
@@ -131,7 +141,39 @@ def normalize_questions(raw_questions: object) -> list[str]:
     return normalized
 
 
-def read_reporting_config(path: Path) -> dict[str, list[str]]:
+def normalize_article_query(raw_query: object) -> str:
+    query = str(raw_query or "").strip()
+    return query or DEFAULT_ARTICLE_QUERY
+
+
+def normalize_article_word_count(raw_count: object) -> int:
+    try:
+        count = int(str(raw_count).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_ARTICLE_WORD_COUNT
+
+    return count if count > 0 else DEFAULT_ARTICLE_WORD_COUNT
+
+
+def render_article_query(article_query: str, word_count: int) -> str:
+    normalized_query = normalize_article_query(article_query)
+    normalized_count = normalize_article_word_count(word_count)
+
+    if re.search(rf"\b{re.escape(ARTICLE_WORD_PLACEHOLDER)}\b", normalized_query):
+        return re.sub(
+            rf"\b{re.escape(ARTICLE_WORD_PLACEHOLDER)}\b",
+            str(normalized_count),
+            normalized_query,
+        )
+
+    return f"{normalized_query.rstrip()} Target length: around {normalized_count} words."
+
+
+def article_query_uses_placeholder(article_query: str) -> bool:
+    return bool(re.search(rf"\b{re.escape(ARTICLE_WORD_PLACEHOLDER)}\b", article_query))
+
+
+def read_reporting_config(path: Path) -> dict[str, object]:
     if not path.exists():
         return default_reporting_config()
 
@@ -147,11 +189,27 @@ def read_reporting_config(path: Path) -> dict[str, list[str]]:
     if not questions:
         questions = DEFAULT_REPORTING_QUESTIONS.copy()
 
-    return {"questions": questions}
+    article_query = normalize_article_query(payload.get("article_query"))
+    article_word_count = normalize_article_word_count(payload.get("article_word_count"))
+
+    return {
+        "questions": questions,
+        "article_query": article_query,
+        "article_word_count": article_word_count,
+    }
 
 
-def write_reporting_config(path: Path, questions: list[str]) -> None:
-    payload = {"questions": questions}
+def write_reporting_config(
+    path: Path,
+    questions: list[str],
+    article_query: str,
+    article_word_count: int,
+) -> None:
+    payload = {
+        "questions": questions,
+        "article_query": normalize_article_query(article_query),
+        "article_word_count": normalize_article_word_count(article_word_count),
+    }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -159,7 +217,12 @@ def ensure_local_reporting_config() -> None:
     if REPORTING_CONFIG_FILE.exists():
         return
 
-    write_reporting_config(REPORTING_CONFIG_FILE, DEFAULT_REPORTING_QUESTIONS.copy())
+    write_reporting_config(
+        REPORTING_CONFIG_FILE,
+        DEFAULT_REPORTING_QUESTIONS.copy(),
+        DEFAULT_ARTICLE_QUERY,
+        DEFAULT_ARTICLE_WORD_COUNT,
+    )
 
 
 def extract_openai_error_message(raw_error: bytes) -> str:
@@ -622,7 +685,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         if payload is None:
             return
 
-        article_query = str(payload.get("article_query", "")).strip()
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        article_query = render_article_query(
+            str(reporting_config["article_query"]),
+            int(reporting_config["article_word_count"]),
+        )
         highlights = normalize_highlights(payload.get("highlights"))
         if not highlights:
             self._send_json(400, {"error": "Add at least one highlighted excerpt before drafting an article."})
@@ -669,6 +736,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "model": model,
                 "article": article,
                 "highlight_count": len(highlights),
+                "article_query": article_query,
+                "article_word_count": reporting_config["article_word_count"],
             },
         )
 
@@ -687,9 +756,22 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"error": "Add at least one reporting question."})
             return
 
+        article_query = normalize_article_query(payload.get("article_query"))
+        if not article_query_uses_placeholder(article_query):
+            self._send_json(
+                400,
+                {"error": "Article query must include the placeholder N for the configured word count."},
+            )
+            return
+
+        article_word_count = normalize_article_word_count(payload.get("article_word_count"))
+        if article_word_count <= 0:
+            self._send_json(400, {"error": "Article word count must be greater than zero."})
+            return
+
         write_env_file(ENV_FILE, {"OPENAI_MODEL": model})
         os.environ["OPENAI_MODEL"] = model
-        write_reporting_config(REPORTING_CONFIG_FILE, questions)
+        write_reporting_config(REPORTING_CONFIG_FILE, questions, article_query, article_word_count)
 
         response_payload = self._config_payload()
         response_payload["message"] = "Configuration saved."
@@ -723,6 +805,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             "openai_model": current_model(),
             "available_models": available_models,
             "questions": reporting_config["questions"],
+            "article_query": reporting_config["article_query"],
+            "article_word_count": reporting_config["article_word_count"],
+            "resolved_article_query": render_article_query(
+                str(reporting_config["article_query"]),
+                int(reporting_config["article_word_count"]),
+            ),
             "models_error": models_error,
         }
 

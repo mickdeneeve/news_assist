@@ -100,7 +100,8 @@
       }
 
       select,
-      input {
+      input,
+      textarea {
         width: 100%;
         padding: 0.9rem 1rem;
         border: 1px solid rgba(24, 33, 38, 0.16);
@@ -108,6 +109,11 @@
         background: rgba(255, 255, 255, 0.78);
         color: var(--text);
         font: inherit;
+      }
+
+      textarea {
+        min-height: 7.5rem;
+        resize: vertical;
       }
 
       .hint {
@@ -194,7 +200,7 @@
       </nav>
 
       <h1>Briefing Configuration</h1>
-      <p>Choose the OpenAI model and define the reporting questions the newsroom brief should answer for any topic or event.</p>
+      <p>Choose the OpenAI model, define the reporting questions, and set the default article request used to turn highlights into a draft.</p>
 
       <form id="config-form">
         <section class="field">
@@ -213,6 +219,23 @@
           </div>
         </section>
 
+        <section class="field">
+          <label for="article-query">Article Query</label>
+          <textarea
+            id="article-query"
+            name="article_query"
+            placeholder="Use N as the word-count placeholder."
+            required
+          ></textarea>
+          <p class="hint">Use <code>N</code> as the placeholder for the configured word count.</p>
+        </section>
+
+        <section class="field">
+          <label for="article-word-count">Article Word Count</label>
+          <input id="article-word-count" name="article_word_count" type="number" min="1" step="1" required />
+          <p class="hint" id="article-preview">Loading article request preview...</p>
+        </section>
+
         <div class="actions">
           <button id="save-button" class="save-button" type="submit">Save Configuration</button>
           <p id="status">Loading current configuration...</p>
@@ -225,9 +248,13 @@
       const modelSelect = document.getElementById("openai-model");
       const modelHint = document.getElementById("model-hint");
       const questionsList = document.getElementById("questions-list");
+      const articleQueryInput = document.getElementById("article-query");
+      const articleWordCountInput = document.getElementById("article-word-count");
+      const articlePreview = document.getElementById("article-preview");
       const addQuestionButton = document.getElementById("add-question");
       const saveButton = document.getElementById("save-button");
       const status = document.getElementById("status");
+      const WORD_PLACEHOLDER_PATTERN = /\bN\b/g;
 
       function addQuestionRow(value = "") {
         const row = document.createElement("div");
@@ -289,6 +316,28 @@
           .filter(Boolean);
       }
 
+      function normalizeArticleWordCount(value) {
+        const count = Number.parseInt(String(value), 10);
+        return Number.isFinite(count) && count > 0 ? count : 300;
+      }
+
+      function renderArticlePreview() {
+        const wordCount = normalizeArticleWordCount(articleWordCountInput.value);
+        const articleQuery = articleQueryInput.value.trim();
+
+        if (!articleQuery) {
+          articlePreview.textContent = "Enter an article query that includes N.";
+          return;
+        }
+
+        if (!/\bN\b/.test(articleQuery)) {
+          articlePreview.textContent = "The article query must include N so the configured word count can be inserted.";
+          return;
+        }
+
+        articlePreview.textContent = `Preview: ${articleQuery.replace(WORD_PLACEHOLDER_PATTERN, String(wordCount))}`;
+      }
+
       async function loadConfig() {
         status.textContent = "Loading current configuration...";
 
@@ -302,6 +351,9 @@
 
           renderModelOptions(payload.openai_model, payload.available_models);
           renderQuestions(payload.questions);
+          articleQueryInput.value = payload.article_query;
+          articleWordCountInput.value = payload.article_word_count;
+          renderArticlePreview();
 
           modelHint.textContent = payload.models_error
             ? `Live model list unavailable: ${payload.models_error}`
@@ -322,6 +374,11 @@
           return;
         }
 
+        if (!/\bN\b/.test(articleQueryInput.value)) {
+          status.textContent = "Article query must include the placeholder N.";
+          return;
+        }
+
         saveButton.disabled = true;
         status.textContent = "Saving configuration...";
 
@@ -334,6 +391,8 @@
             body: JSON.stringify({
               openai_model: modelSelect.value,
               questions,
+              article_query: articleQueryInput.value.trim(),
+              article_word_count: normalizeArticleWordCount(articleWordCountInput.value),
             }),
           });
 
@@ -344,6 +403,9 @@
 
           renderModelOptions(payload.openai_model, payload.available_models);
           renderQuestions(payload.questions);
+          articleQueryInput.value = payload.article_query;
+          articleWordCountInput.value = payload.article_word_count;
+          renderArticlePreview();
 
           modelHint.textContent = payload.models_error
             ? `Live model list unavailable: ${payload.models_error}`
@@ -358,6 +420,8 @@
       }
 
       addQuestionButton.addEventListener("click", () => addQuestionRow());
+      articleQueryInput.addEventListener("input", renderArticlePreview);
+      articleWordCountInput.addEventListener("input", renderArticlePreview);
       form.addEventListener("submit", saveConfig);
       loadConfig();
     </script>
