@@ -22,6 +22,7 @@ OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses"
 OPENAI_MODELS_API_URL = "https://api.openai.com/v1/models"
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_PORT = "8000"
+SERVER_INSTANCE_ID = f"{os.getpid()}-{time.time_ns()}"
 CONFIG_KEYS = ("OPENAI_API_KEY", "OPENAI_MODEL", "PORT")
 RELOAD_ENV_VAR = "NEWS_ASSIST_RUN_SERVER"
 DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
@@ -790,6 +791,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 {
                     "message": backend_text(language, "hello_message"),
                     "model": current_model(),
+                    "instance_id": SERVER_INSTANCE_ID,
                     "edition": reporting_config["edition"],
                     "language": language,
                 },
@@ -1034,6 +1036,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             202,
             {
                 "message": backend_text(language, "restart_started"),
+                "instance_id": SERVER_INSTANCE_ID,
             },
         )
 

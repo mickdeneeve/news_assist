@@ -845,16 +845,26 @@
         return new Promise((resolve) => window.setTimeout(resolve, delayMs));
       }
 
-      async function waitForServerRestart() {
+      async function currentServerInstanceId() {
+        const response = await fetch(`/api/hello?ts=${Date.now()}`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        return typeof payload.instance_id === "string" ? payload.instance_id : "";
+      }
+
+      async function waitForServerRestart(previousInstanceId = "") {
         const deadline = Date.now() + RESTART_TIMEOUT_MS;
 
         while (Date.now() < deadline) {
           try {
-            const response = await fetch(`/api/hello?ts=${Date.now()}`, {
-              cache: "no-store",
-            });
-
-            if (response.ok) {
+            const instanceId = await currentServerInstanceId();
+            if (!previousInstanceId || (instanceId && instanceId !== previousInstanceId)) {
               return;
             }
           } catch (error) {
@@ -873,6 +883,7 @@
         status.textContent = text("restartInProgress");
 
         try {
+          const previousInstanceId = await currentServerInstanceId();
           const response = await fetch("/api/restart", {
             method: "POST",
             headers: {
@@ -888,7 +899,11 @@
 
           sessionStorage.removeItem(BRIEFING_STORAGE_KEY);
           status.textContent = payload.message || text("restartFallback");
-          await waitForServerRestart();
+          await waitForServerRestart(
+            typeof payload.instance_id === "string" && payload.instance_id
+              ? payload.instance_id
+              : previousInstanceId
+          );
           window.location.href = "/";
         } catch (error) {
           status.textContent = error.message;
