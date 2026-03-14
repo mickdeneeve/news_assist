@@ -28,34 +28,44 @@ DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
 WATCHED_SUFFIXES = {".py"}
 IGNORED_DIRS = {".git", "__pycache__"}
 RESTART_EXIT_CODE = 75
-DEFAULT_LANGUAGE = "en"
-SUPPORTED_LANGUAGES = {"en", "nl"}
-LOCALIZED_DEFAULT_REPORTING_QUESTIONS = {
-    "en": [
-        "What happened, in one clear summary?",
-        "Who are the key people, organizations, or institutions involved?",
-        "Why does this matter right now?",
-        "What context or background does a reader need?",
-        "What remains unknown, disputed, or unverified?",
-    ],
-    "nl": [
-        "Wat is er gebeurd, in een heldere samenvatting?",
-        "Wie zijn de belangrijkste personen, organisaties of instellingen die hierbij betrokken zijn?",
-        "Waarom is dit nu van belang?",
-        "Welke context of achtergrond heeft een lezer nodig?",
-        "Wat is nog onbekend, omstreden of niet geverifieerd?",
-    ],
+DEFAULT_EDITION = "international_en"
+EDITION_PROFILES = {
+    "international_en": {
+        "region": "international",
+        "language": "en",
+        "defaults": {
+            "questions": [
+                "What happened, in one clear summary?",
+                "Who are the key people, organizations, or institutions involved?",
+                "Why does this matter right now?",
+                "What context or background does a reader need?",
+                "What remains unknown, disputed, or unverified?",
+            ],
+            "article_query": (
+                "Write a news article of around N words. It should have the most general information first, "
+                "and the more specific stuff after."
+            ),
+        },
+    },
+    "netherlands_nl": {
+        "region": "netherlands",
+        "language": "nl",
+        "defaults": {
+            "questions": [
+                "Wat is er gebeurd, in een heldere samenvatting?",
+                "Wie zijn de belangrijkste personen, organisaties of instellingen die hierbij betrokken zijn?",
+                "Waarom is dit nu van belang?",
+                "Welke context of achtergrond heeft een lezer nodig?",
+                "Wat is nog onbekend, omstreden of niet geverifieerd?",
+            ],
+            "article_query": (
+                "Schrijf een nieuwsartikel van ongeveer N woorden. Zet de meest algemene informatie eerst "
+                "en de meer specifieke informatie daarna."
+            ),
+        },
+    },
 }
-LOCALIZED_DEFAULT_ARTICLE_QUERY = {
-    "en": (
-        "Write a news article of around N words. It should have the most general information first, "
-        "and the more specific stuff after."
-    ),
-    "nl": (
-        "Schrijf een nieuwsartikel van ongeveer N woorden. Zet de meest algemene informatie eerst "
-        "en de meer specifieke informatie daarna."
-    ),
-}
+SUPPORTED_LANGUAGES = {str(profile["language"]) for profile in EDITION_PROFILES.values()}
 DEFAULT_ARTICLE_WORD_COUNT = 300
 DEFAULT_ARTICLE_SELECTION_MODE = "exclude"
 ARTICLE_SELECTION_MODES = {"include", "exclude"}
@@ -117,15 +127,43 @@ BACKEND_TEXT = {
 
 def normalize_language(raw_language: object) -> str:
     language = str(raw_language or "").strip().lower()
-    return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+    return language if language in SUPPORTED_LANGUAGES else str(
+        EDITION_PROFILES[DEFAULT_EDITION]["language"]
+    )
 
 
-def localized_reporting_questions(language: str) -> list[str]:
-    return LOCALIZED_DEFAULT_REPORTING_QUESTIONS[normalize_language(language)].copy()
+def legacy_language_to_edition(raw_language: object) -> str:
+    language = normalize_language(raw_language)
+    if language == "nl":
+        return "netherlands_nl"
+    return DEFAULT_EDITION
 
 
-def localized_article_query(language: str) -> str:
-    return LOCALIZED_DEFAULT_ARTICLE_QUERY[normalize_language(language)]
+def normalize_edition(raw_edition: object) -> str:
+    edition = str(raw_edition or "").strip().lower()
+    if edition in EDITION_PROFILES:
+        return edition
+    return legacy_language_to_edition(raw_edition)
+
+
+def edition_profile(edition: str) -> dict[str, object]:
+    return EDITION_PROFILES[normalize_edition(edition)]
+
+
+def edition_language(edition: str) -> str:
+    return str(edition_profile(edition)["language"])
+
+
+def edition_region(edition: str) -> str:
+    return str(edition_profile(edition)["region"])
+
+
+def localized_reporting_questions(edition: str) -> list[str]:
+    return list(edition_profile(edition)["defaults"]["questions"])
+
+
+def localized_article_query(edition: str) -> str:
+    return str(edition_profile(edition)["defaults"]["article_query"])
 
 
 def backend_text(language: str, key: str, **kwargs: object) -> str:
@@ -212,11 +250,12 @@ def current_port() -> str:
 
 
 def default_reporting_config() -> dict[str, object]:
-    language = DEFAULT_LANGUAGE
+    edition = DEFAULT_EDITION
     return {
-        "language": language,
-        "questions": localized_reporting_questions(language),
-        "article_query": localized_article_query(language),
+        "edition": edition,
+        "language": edition_language(edition),
+        "questions": localized_reporting_questions(edition),
+        "article_query": localized_article_query(edition),
         "article_word_count": DEFAULT_ARTICLE_WORD_COUNT,
         "article_selection_mode": DEFAULT_ARTICLE_SELECTION_MODE,
     }
@@ -283,18 +322,20 @@ def read_reporting_config(path: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         return default_reporting_config()
 
-    language = normalize_language(payload.get("language"))
+    edition = normalize_edition(payload.get("edition", payload.get("language")))
+    language = edition_language(edition)
     questions = normalize_questions(payload.get("questions"))
     if not questions:
-        questions = localized_reporting_questions(language)
+        questions = localized_reporting_questions(edition)
 
     article_query = normalize_article_query(payload.get("article_query"))
     if not article_query:
-        article_query = localized_article_query(language)
+        article_query = localized_article_query(edition)
     article_word_count = normalize_article_word_count(payload.get("article_word_count"))
     article_selection_mode = normalize_article_selection_mode(payload.get("article_selection_mode"))
 
     return {
+        "edition": edition,
         "language": language,
         "questions": questions,
         "article_query": article_query,
@@ -305,17 +346,17 @@ def read_reporting_config(path: Path) -> dict[str, object]:
 
 def write_reporting_config(
     path: Path,
-    language: str,
+    edition: str,
     questions: list[str],
     article_query: str,
     article_word_count: int,
     article_selection_mode: str,
 ) -> None:
-    normalized_language = normalize_language(language)
+    normalized_edition = normalize_edition(edition)
     payload = {
-        "language": normalized_language,
+        "edition": normalized_edition,
         "questions": questions,
-        "article_query": normalize_article_query(article_query) or localized_article_query(normalized_language),
+        "article_query": normalize_article_query(article_query) or localized_article_query(normalized_edition),
         "article_word_count": normalize_article_word_count(article_word_count),
         "article_selection_mode": normalize_article_selection_mode(article_selection_mode),
     }
@@ -328,9 +369,9 @@ def ensure_local_reporting_config() -> None:
 
     write_reporting_config(
         REPORTING_CONFIG_FILE,
-        DEFAULT_LANGUAGE,
-        localized_reporting_questions(DEFAULT_LANGUAGE),
-        localized_article_query(DEFAULT_LANGUAGE),
+        DEFAULT_EDITION,
+        localized_reporting_questions(DEFAULT_EDITION),
+        localized_article_query(DEFAULT_EDITION),
         DEFAULT_ARTICLE_WORD_COUNT,
         DEFAULT_ARTICLE_SELECTION_MODE,
     )
@@ -402,18 +443,24 @@ def fetch_available_models(language: str) -> tuple[list[str], str | None]:
     return models, None
 
 
-def build_briefing_prompt(topic: str, questions: list[str], language: str) -> str:
+def build_briefing_prompt(topic: str, questions: list[str], edition: str) -> str:
     numbered_questions = "\n".join(
         f"{index}. {question}" for index, question in enumerate(questions, start=1)
     )
 
-    if normalize_language(language) == "nl":
+    if normalize_edition(edition) == "netherlands_nl":
         return (
-            "Je bent een journalistieke onderzoeksassistent. Gebruik web search om elke verslaggeversvraag over "
-            "het opgegeven onderwerp of de gebeurtenis te beantwoorden. Schrijf beknopte, feitelijke "
-            "briefingteksten voor een journalist. Wees expliciet over onzekerheid, maak onderscheid tussen wat "
-            "bekend is en wat onduidelijk blijft, en verzin geen bronnen, citaten of details. Antwoord in het "
-            "Nederlands. Geef uitsluitend geldige JSON terug, met exact deze structuur: "
+            "Je bent een journalistieke onderzoeksassistent voor Nederland. Gebruik web search om elke "
+            "verslaggeversvraag over het opgegeven onderwerp of de gebeurtenis te beantwoorden. Geef sterke "
+            "voorkeur aan Nederlandstalige bronnen en bronnen uit Nederland, waaronder Nederlandse "
+            "nieuwsorganisaties, Nederlandse overheidsinstellingen, Nederlandse toezichthouders, Nederlandse "
+            "rechtbanken en Nederlandse onderzoeksinstellingen wanneer relevant. Gebruik niet-Nederlandse "
+            "bronnen alleen als Nederlandse dekking onvoldoende is of als een primaire bron elders noodzakelijk "
+            "is. Laat zulke niet-Nederlandse bronnen niet domineren als er bruikbare Nederlandse bronnen zijn. "
+            "Schrijf beknopte, feitelijke briefingteksten voor een journalist. Wees expliciet over onzekerheid, "
+            "maak onderscheid tussen wat bekend is en wat onduidelijk blijft, en verzin geen bronnen, citaten "
+            "of details. Antwoord in het Nederlands. Geef uitsluitend geldige JSON terug, met exact deze "
+            "structuur: "
             '{"answers":[{"question":"<kopieer de oorspronkelijke vraag>","answer":"<antwoord zonder URLs>",'
             '"links":["<relevante bron-url>"]}]}. Houd de vragen in dezelfde volgorde en neem elke vraag precies '
             "een keer op. Zet bron-URLs alleen in de links-array, nooit in de antwoordtekst. Als een antwoord "
@@ -425,9 +472,11 @@ def build_briefing_prompt(topic: str, questions: list[str], language: str) -> st
 
     return (
         "You are a journalism research assistant. Use web search to answer each reporting question about the "
-        "provided topic or event. Write concise, factual briefings for a reporter. Be explicit about uncertainty, "
-        "distinguish what is known from what remains unclear, and do not invent sources, quotes, or details. "
-        "Answer in English. Return valid JSON only, with "
+        "provided topic or event. Prioritize the most authoritative and relevant sources internationally. Do not "
+        "restrict yourself to English-language sources when primary or better sources exist in other languages, "
+        "but write the final briefing in English. Write concise, factual briefings for a reporter. Be explicit "
+        "about uncertainty, distinguish what is known from what remains unclear, and do not invent sources, "
+        "quotes, or details. Return valid JSON only, with "
         'this exact shape: {"answers":[{"question":"<copy the original question>","answer":"<answer with no URLs>",'
         '"links":["<relevant source url>"]}]}. Keep the questions in the same order and include every question '
         "exactly once. Put source URLs only in the links array, never inside the answer text. If an answer has no "
@@ -564,14 +613,14 @@ def normalize_article_excerpts(raw_excerpts: object) -> list[dict[str, str]]:
     return normalized
 
 
-def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], language: str) -> str:
-    instruction = article_query.strip() or localized_article_query(language)
+def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], edition: str) -> str:
+    instruction = article_query.strip() or localized_article_query(edition)
     excerpt_block = "\n\n".join(
         f"Excerpt {index}\nQuestion: {item['question']}\nText: {item['text']}"
         for index, item in enumerate(excerpts, start=1)
     )
 
-    if normalize_language(language) == "nl":
+    if normalize_edition(edition) == "netherlands_nl":
         return (
             "Je bent een newsroom-assistent. Schrijf een nieuwsartikel met uitsluitend de opgegeven "
             "bronfragmenten. Voeg geen feiten, citaten, toeschrijvingen, data, cijfers of context toe die niet "
@@ -741,6 +790,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 {
                     "message": backend_text(language, "hello_message"),
                     "model": current_model(),
+                    "edition": reporting_config["edition"],
                     "language": language,
                 },
             )
@@ -780,6 +830,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        edition = reporting_config["edition"]
         language = reporting_config["language"]
 
         topic = str(payload.get("query", "")).strip()
@@ -800,7 +851,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "tools": [{"type": "web_search"}],
                 "tool_choice": "auto",
                 "include": ["web_search_call.action.sources"],
-                "input": build_briefing_prompt(topic, reporting_questions, language),
+                "input": build_briefing_prompt(topic, reporting_questions, edition),
             }
         ).encode("utf-8")
         request = Request(
@@ -855,6 +906,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        edition = reporting_config["edition"]
         language = reporting_config["language"]
         article_query = render_article_query(
             str(reporting_config["article_query"]),
@@ -876,7 +928,7 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         model = current_model()
         request_body = json.dumps(
-            {"model": model, "input": build_article_prompt(article_query, excerpts, language)}
+            {"model": model, "input": build_article_prompt(article_query, excerpts, edition)}
         ).encode("utf-8")
         request = Request(
             OPENAI_RESPONSES_API_URL,
@@ -924,8 +976,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         current_config = read_reporting_config(REPORTING_CONFIG_FILE)
-        previous_language = current_config["language"]
-        language = normalize_language(payload.get("language", previous_language))
+        previous_edition = current_config["edition"]
+        edition = normalize_edition(payload.get("edition", payload.get("language", previous_edition)))
+        language = edition_language(edition)
         model = str(payload.get("openai_model", current_model())).strip()
         if not model:
             self._send_json(400, {"error": backend_text(language, "model_empty")})
@@ -938,13 +991,13 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         article_query = normalize_article_query(payload.get("article_query"))
         if not article_query:
-            article_query = localized_article_query(language)
+            article_query = localized_article_query(edition)
 
-        if language != previous_language:
-            if questions == localized_reporting_questions(previous_language):
-                questions = localized_reporting_questions(language)
-            if article_query == localized_article_query(previous_language):
-                article_query = localized_article_query(language)
+        if edition != previous_edition:
+            if questions == localized_reporting_questions(previous_edition):
+                questions = localized_reporting_questions(edition)
+            if article_query == localized_article_query(previous_edition):
+                article_query = localized_article_query(edition)
 
         if not article_query_uses_placeholder(article_query):
             self._send_json(
@@ -964,7 +1017,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         os.environ["OPENAI_MODEL"] = model
         write_reporting_config(
             REPORTING_CONFIG_FILE,
-            language,
+            edition,
             questions,
             article_query,
             article_word_count,
@@ -1020,6 +1073,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         available_models, models_error = fetch_available_models(language)
 
         return {
+            "edition": reporting_config["edition"],
+            "region": edition_region(reporting_config["edition"]),
             "language": language,
             "openai_model": current_model(),
             "available_models": available_models,

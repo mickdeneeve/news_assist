@@ -550,6 +550,15 @@
       };
 
       const STORAGE_KEY = "news_assist_briefing_state";
+      const DEFAULT_EDITION = "international_en";
+      const EDITIONS = {
+        international_en: {
+          language: "en",
+        },
+        netherlands_nl: {
+          language: "nl",
+        },
+      };
       const navBriefing = document.getElementById("nav-briefing");
       const navConfig = document.getElementById("nav-config");
       const pageTitle = document.getElementById("page-title");
@@ -578,11 +587,24 @@
       const articleDraft = document.getElementById("article-draft");
       const DEFAULT_ARTICLE_SELECTION_MODE = "exclude";
       const URL_PATTERN = /https?:\/\/[^\s<>()]+/gi;
+      let currentEdition = DEFAULT_EDITION;
       let currentLanguage = "en";
       let currentResolvedArticleQuery = "";
 
       function normalizeLanguage(value) {
         return value === "nl" ? "nl" : "en";
+      }
+
+      function normalizeEdition(value) {
+        if (Object.prototype.hasOwnProperty.call(EDITIONS, value)) {
+          return value;
+        }
+
+        return normalizeLanguage(value) === "nl" ? "netherlands_nl" : DEFAULT_EDITION;
+      }
+
+      function editionLanguage(edition = currentEdition) {
+        return EDITIONS[normalizeEdition(edition)].language;
       }
 
       function text(key, params = {}) {
@@ -753,6 +775,7 @@
 
       function defaultBriefingState() {
         return {
+          edition: currentEdition,
           language: currentLanguage,
           query: "",
           status: text("ready"),
@@ -774,8 +797,10 @@
           }
 
           const parsed = JSON.parse(raw);
+          const edition = normalizeEdition(parsed.edition || parsed.language);
           return {
-            language: normalizeLanguage(parsed.language),
+            edition,
+            language: editionLanguage(edition),
             query: typeof parsed.query === "string" ? parsed.query : "",
             status: typeof parsed.status === "string" ? parsed.status : text("ready"),
             answers: normalizeAnswerItems(parsed.answers),
@@ -795,7 +820,8 @@
       }
 
       let briefingState = loadBriefingState();
-      currentLanguage = normalizeLanguage(briefingState.language);
+      currentEdition = normalizeEdition(briefingState.edition || briefingState.language);
+      currentLanguage = editionLanguage(currentEdition);
       let highlightNoteTimer = null;
 
       function persistBriefingState() {
@@ -803,7 +829,12 @@
       }
 
       function updateBriefingState(updates) {
-        briefingState = { ...briefingState, ...updates, language: currentLanguage };
+        briefingState = {
+          ...briefingState,
+          ...updates,
+          edition: currentEdition,
+          language: currentLanguage,
+        };
         persistBriefingState();
       }
 
@@ -927,6 +958,8 @@
 
       briefingState = {
         ...briefingState,
+        edition: currentEdition,
+        language: currentLanguage,
         answers: normalizeAnswerItems(briefingState.answers),
         selectionMode: normalizeSelectionMode(briefingState.selectionMode),
         highlights: normalizeStoredHighlights(briefingState.highlights, briefingState.answers),
@@ -1378,12 +1411,18 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
+          const nextEdition = normalizeEdition(payload.edition || payload.language);
           const previousLanguage = currentLanguage;
-          currentLanguage = normalizeLanguage(payload.language);
+          currentEdition = nextEdition;
+          currentLanguage = editionLanguage(currentEdition);
           localizeStateForLanguage(previousLanguage, currentLanguage);
           const nextSelectionMode = normalizeSelectionMode(payload.article_selection_mode);
           const selectionModeChanged = briefingState.selectionMode !== nextSelectionMode;
-          const nextState = { selectionMode: nextSelectionMode };
+          const nextState = {
+            edition: currentEdition,
+            language: currentLanguage,
+            selectionMode: nextSelectionMode,
+          };
           if (selectionModeChanged) {
             nextState.highlights = [];
             nextState.articleStatus = defaultArticleStatus(nextSelectionMode);
