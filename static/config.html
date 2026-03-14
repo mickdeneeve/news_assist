@@ -42,6 +42,75 @@
         backdrop-filter: blur(14px);
       }
 
+      .language-bar {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 0.8rem;
+        margin-bottom: 1rem;
+      }
+
+      .language-label {
+        margin: 0;
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      .language-toggle {
+        display: inline-flex;
+        gap: 0.35rem;
+        padding: 0.35rem;
+        border-radius: 999px;
+        background: rgba(13, 107, 102, 0.08);
+      }
+
+      .language-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.55rem 0.9rem;
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .language-option.active {
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 10px 18px -16px var(--shadow);
+      }
+
+      .flag-icon {
+        display: inline-block;
+        width: 1.3rem;
+        height: 0.92rem;
+        border-radius: 0.18rem;
+        box-shadow: inset 0 0 0 1px rgba(24, 33, 38, 0.12);
+      }
+
+      .flag-en {
+        background:
+          linear-gradient(90deg, transparent 39%, #ffffff 39%, #ffffff 61%, transparent 61%),
+          linear-gradient(transparent 34%, #ffffff 34%, #ffffff 66%, transparent 66%),
+          linear-gradient(90deg, transparent 45%, #c8102e 45%, #c8102e 55%, transparent 55%),
+          linear-gradient(transparent 42%, #c8102e 42%, #c8102e 58%, transparent 58%),
+          #012169;
+      }
+
+      .flag-nl {
+        background: linear-gradient(
+          #ae1c28 0 33.33%,
+          #ffffff 33.33% 66.66%,
+          #21468b 66.66% 100%
+        );
+      }
+
       .nav {
         display: flex;
         gap: 0.75rem;
@@ -213,50 +282,66 @@
   </head>
   <body>
     <main>
+      <div class="language-bar">
+        <p id="language-label" class="language-label">Language</p>
+        <div class="language-toggle" role="group" aria-labelledby="language-label">
+          <button type="button" class="language-option active" data-language="en" aria-pressed="true">
+            <span class="flag-icon flag-en" aria-hidden="true"></span>
+            <span>English</span>
+          </button>
+          <button type="button" class="language-option" data-language="nl" aria-pressed="false">
+            <span class="flag-icon flag-nl" aria-hidden="true"></span>
+            <span>Nederlands</span>
+          </button>
+        </div>
+      </div>
+
       <nav class="nav" aria-label="Primary">
-        <a href="/">Briefing</a>
-        <a class="active" href="/config">Configuration</a>
+        <a id="nav-briefing" href="/">Briefing</a>
+        <a id="nav-config" class="active" href="/config">Configuration</a>
       </nav>
 
-      <h1>Briefing Configuration</h1>
-      <p>Choose the OpenAI model, define the reporting questions, and set how article drafting should treat selected passages.</p>
+      <h1 id="page-title">Briefing Configuration</h1>
+      <p id="page-intro">
+        Choose the OpenAI model, define the reporting questions, and set how article drafting should treat selected passages.
+      </p>
 
       <form id="config-form">
         <section class="field">
-          <label for="openai-model">OpenAI Model</label>
+          <label id="model-label" for="openai-model">OpenAI Model</label>
           <select id="openai-model" name="openai_model" required></select>
           <p class="hint" id="model-hint">Loading the current model list...</p>
         </section>
 
         <section class="field">
-          <label>Reporting Questions</label>
+          <label id="questions-label">Reporting Questions</label>
           <div id="questions-list" class="question-list"></div>
 
           <div class="toolbar">
             <button id="add-question" class="icon-button" type="button" aria-label="Add question">+</button>
-            <span>Add another reporting question</span>
+            <span id="add-question-text">Add another reporting question</span>
           </div>
         </section>
 
         <section class="field">
-          <label for="article-query">Article Query</label>
+          <label id="article-query-label" for="article-query">Article Query</label>
           <textarea
             id="article-query"
             name="article_query"
             placeholder="Use N as the word-count placeholder."
             required
           ></textarea>
-          <p class="hint">Use <code>N</code> as the placeholder for the configured word count.</p>
+          <p class="hint" id="article-query-hint">Use <code>N</code> as the placeholder for the configured word count.</p>
         </section>
 
         <section class="field">
-          <label for="article-word-count">Article Word Count</label>
+          <label id="article-word-count-label" for="article-word-count">Article Word Count</label>
           <input id="article-word-count" name="article_word_count" type="number" min="1" step="1" required />
           <p class="hint" id="article-preview">Loading article request preview...</p>
         </section>
 
         <section class="field">
-          <label for="article-selection-mode">Article Selection Mode</label>
+          <label id="article-selection-mode-label" for="article-selection-mode">Article Selection Mode</label>
           <select id="article-selection-mode" name="article_selection_mode" required>
             <option value="exclude">Exclude in red</option>
             <option value="include">Include in yellow</option>
@@ -267,8 +352,8 @@
         </section>
 
         <section class="field">
-          <label for="restart-button">App Re-initialization</label>
-          <p class="hint">
+          <label id="restart-label" for="restart-button">App Re-initialization</label>
+          <p class="hint" id="restart-hint">
             Clear the current briefing state in this tab and restart the local app so it comes back from a clean state.
           </p>
           <div class="field-actions">
@@ -284,16 +369,153 @@
     </main>
 
     <script>
+      const DEFAULTS = {
+        en: {
+          questions: [
+            "What happened, in one clear summary?",
+            "Who are the key people, organizations, or institutions involved?",
+            "Why does this matter right now?",
+            "What context or background does a reader need?",
+            "What remains unknown, disputed, or unverified?",
+          ],
+          articleQuery:
+            "Write a news article of around N words. It should have the most general information first, and the more specific stuff after.",
+        },
+        nl: {
+          questions: [
+            "Wat is er gebeurd, in een heldere samenvatting?",
+            "Wie zijn de belangrijkste personen, organisaties of instellingen die hierbij betrokken zijn?",
+            "Waarom is dit nu van belang?",
+            "Welke context of achtergrond heeft een lezer nodig?",
+            "Wat is nog onbekend, omstreden of niet geverifieerd?",
+          ],
+          articleQuery:
+            "Schrijf een nieuwsartikel van ongeveer N woorden. Zet de meest algemene informatie eerst en de meer specifieke informatie daarna.",
+        },
+      };
+
+      const COPY = {
+        en: {
+          documentTitle: "Briefing Configuration",
+          languageLabel: "Language",
+          navBriefing: "Briefing",
+          navConfig: "Configuration",
+          pageTitle: "Briefing Configuration",
+          pageIntro:
+            "Choose the OpenAI model, define the reporting questions, and set how article drafting should treat selected passages.",
+          modelLabel: "OpenAI Model",
+          modelHintLoading: "Loading the current model list...",
+          modelHintAvailable: ({ count }) => `${count} model(s) available from OpenAI.`,
+          modelHintUnavailable: ({ error }) => `Live model list unavailable: ${error}`,
+          questionsLabel: "Reporting Questions",
+          addQuestionAria: "Add question",
+          addQuestionText: "Add another reporting question",
+          questionPlaceholder: "Enter a reporting question",
+          removeButton: "Remove",
+          articleQueryLabel: "Article Query",
+          articleQueryPlaceholder: "Use N as the word-count placeholder.",
+          articleQueryHintHtml: "Use <code>N</code> as the placeholder for the configured word count.",
+          articleWordCountLabel: "Article Word Count",
+          articlePreviewLoading: "Loading article request preview...",
+          articlePreviewEmpty: "Enter an article query that includes N.",
+          articlePreviewNeedN:
+            "The article query must include N so the configured word count can be inserted.",
+          articlePreviewValue: ({ preview }) => `Preview: ${preview}`,
+          articleSelectionModeLabel: "Article Selection Mode",
+          selectionModeExclude: "Exclude in red",
+          selectionModeInclude: "Include in yellow",
+          selectionModeHintExclude:
+            "In exclude mode, selected text is marked in red and removed from the source material used for the article.",
+          selectionModeHintInclude:
+            "In include mode, only the selected yellow passages will be used to build the article.",
+          restartLabel: "App Re-initialization",
+          restartHint:
+            "Clear the current briefing state in this tab and restart the local app so it comes back from a clean state.",
+          restartButton: "Re-initialize App",
+          saveButton: "Save Configuration",
+          statusLoading: "Loading current configuration...",
+          statusLoaded: "Current configuration loaded.",
+          statusNeedQuestion: "Add at least one reporting question.",
+          statusNeedPlaceholderN: "Article query must include the placeholder N.",
+          statusSaving: "Saving configuration...",
+          restartInProgress: "Re-initializing the app from a clean state...",
+          restartFallback: "Restarting the app...",
+          restartTimeout: "The app did not come back after restarting.",
+        },
+        nl: {
+          documentTitle: "Briefingconfiguratie",
+          languageLabel: "Taal",
+          navBriefing: "Briefing",
+          navConfig: "Configuratie",
+          pageTitle: "Briefingconfiguratie",
+          pageIntro:
+            "Kies het OpenAI-model, stel de verslaggeversvragen in en bepaal hoe artikelopbouw met geselecteerde passages moet omgaan.",
+          modelLabel: "OpenAI-model",
+          modelHintLoading: "De huidige modellenlijst wordt geladen...",
+          modelHintAvailable: ({ count }) => `${count} model(len) beschikbaar via OpenAI.`,
+          modelHintUnavailable: ({ error }) => `Live-modellenlijst niet beschikbaar: ${error}`,
+          questionsLabel: "Verslaggeversvragen",
+          addQuestionAria: "Vraag toevoegen",
+          addQuestionText: "Nog een verslaggeversvraag toevoegen",
+          questionPlaceholder: "Voer een verslaggeversvraag in",
+          removeButton: "Verwijderen",
+          articleQueryLabel: "Artikelopdracht",
+          articleQueryPlaceholder: "Gebruik N als placeholder voor het woordenaantal.",
+          articleQueryHintHtml: "Gebruik <code>N</code> als placeholder voor het ingestelde woordenaantal.",
+          articleWordCountLabel: "Woordenaantal voor artikel",
+          articlePreviewLoading: "Voorbeeld van artikelopdracht wordt geladen...",
+          articlePreviewEmpty: "Voer een artikelopdracht in die N bevat.",
+          articlePreviewNeedN:
+            "De artikelopdracht moet N bevatten zodat het ingestelde woordenaantal kan worden ingevuld.",
+          articlePreviewValue: ({ preview }) => `Voorbeeld: ${preview}`,
+          articleSelectionModeLabel: "Artikelselectiemodus",
+          selectionModeExclude: "Uitsluiten in rood",
+          selectionModeInclude: "Opnemen in geel",
+          selectionModeHintExclude:
+            "In uitsluitmodus wordt geselecteerde tekst rood gemarkeerd en verwijderd uit het bronmateriaal voor het artikel.",
+          selectionModeHintInclude:
+            "In opnamemodus worden alleen de geselecteerde gele passages gebruikt om het artikel op te bouwen.",
+          restartLabel: "App opnieuw initialiseren",
+          restartHint:
+            "Wis de huidige briefingstatus in dit tabblad en start de lokale app opnieuw op zodat die vanuit een schone toestand terugkomt.",
+          restartButton: "App opnieuw initialiseren",
+          saveButton: "Configuratie opslaan",
+          statusLoading: "Huidige configuratie wordt geladen...",
+          statusLoaded: "Huidige configuratie geladen.",
+          statusNeedQuestion: "Voeg minstens een verslaggeversvraag toe.",
+          statusNeedPlaceholderN: "De artikelopdracht moet de placeholder N bevatten.",
+          statusSaving: "Configuratie wordt opgeslagen...",
+          restartInProgress: "De app wordt opnieuw geinitialiseerd vanuit een schone toestand...",
+          restartFallback: "De app wordt opnieuw opgestart...",
+          restartTimeout: "De app kwam niet terug nadat die opnieuw was opgestart.",
+        },
+      };
+
       const form = document.getElementById("config-form");
+      const languageButtons = Array.from(document.querySelectorAll(".language-option"));
+      const navBriefing = document.getElementById("nav-briefing");
+      const navConfig = document.getElementById("nav-config");
+      const languageLabel = document.getElementById("language-label");
+      const pageTitle = document.getElementById("page-title");
+      const pageIntro = document.getElementById("page-intro");
+      const modelLabel = document.getElementById("model-label");
       const modelSelect = document.getElementById("openai-model");
       const modelHint = document.getElementById("model-hint");
+      const questionsLabel = document.getElementById("questions-label");
       const questionsList = document.getElementById("questions-list");
+      const addQuestionButton = document.getElementById("add-question");
+      const addQuestionText = document.getElementById("add-question-text");
+      const articleQueryLabel = document.getElementById("article-query-label");
       const articleQueryInput = document.getElementById("article-query");
+      const articleQueryHint = document.getElementById("article-query-hint");
+      const articleWordCountLabel = document.getElementById("article-word-count-label");
       const articleWordCountInput = document.getElementById("article-word-count");
       const articlePreview = document.getElementById("article-preview");
+      const articleSelectionModeLabel = document.getElementById("article-selection-mode-label");
       const articleSelectionModeInput = document.getElementById("article-selection-mode");
       const selectionModeHint = document.getElementById("selection-mode-hint");
-      const addQuestionButton = document.getElementById("add-question");
+      const restartLabel = document.getElementById("restart-label");
+      const restartHint = document.getElementById("restart-hint");
       const restartButton = document.getElementById("restart-button");
       const saveButton = document.getElementById("save-button");
       const status = document.getElementById("status");
@@ -301,6 +523,56 @@
       const WORD_PLACEHOLDER_PATTERN = /\bN\b/g;
       const RESTART_POLL_INTERVAL_MS = 500;
       const RESTART_TIMEOUT_MS = 15000;
+      let currentLanguage = "en";
+      let currentModelsError = null;
+      let currentAvailableModels = [];
+
+      function normalizeLanguage(value) {
+        return value === "nl" ? "nl" : "en";
+      }
+
+      function text(key, params = {}) {
+        const entry = COPY[currentLanguage][key];
+        return typeof entry === "function" ? entry(params) : entry;
+      }
+
+      function defaultQuestions(language = currentLanguage) {
+        return DEFAULTS[normalizeLanguage(language)].questions.slice();
+      }
+
+      function defaultArticleQuery(language = currentLanguage) {
+        return DEFAULTS[normalizeLanguage(language)].articleQuery;
+      }
+
+      function arraysEqual(left, right) {
+        if (left.length !== right.length) {
+          return false;
+        }
+
+        return left.every((value, index) => value === right[index]);
+      }
+
+      function renderLanguageToggle() {
+        languageButtons.forEach((button) => {
+          const active = button.dataset.language === currentLanguage;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+      }
+
+      function renderModelHint() {
+        if (currentModelsError) {
+          modelHint.textContent = text("modelHintUnavailable", { error: currentModelsError });
+          return;
+        }
+
+        if (currentAvailableModels.length) {
+          modelHint.textContent = text("modelHintAvailable", { count: currentAvailableModels.length });
+          return;
+        }
+
+        modelHint.textContent = text("modelHintLoading");
+      }
 
       function addQuestionRow(value = "") {
         const row = document.createElement("div");
@@ -308,14 +580,14 @@
 
         const input = document.createElement("input");
         input.type = "text";
-        input.placeholder = "Enter a reporting question";
+        input.placeholder = text("questionPlaceholder");
         input.value = value;
         input.required = true;
 
         const removeButton = document.createElement("button");
         removeButton.type = "button";
         removeButton.className = "remove-button";
-        removeButton.textContent = "Remove";
+        removeButton.textContent = text("removeButton");
         removeButton.addEventListener("click", () => {
           row.remove();
 
@@ -371,11 +643,20 @@
         return value === "include" ? "include" : "exclude";
       }
 
+      function renderSelectionModeOptions() {
+        const currentValue = normalizeSelectionMode(articleSelectionModeInput.value);
+        Array.from(articleSelectionModeInput.options).forEach((option) => {
+          option.textContent =
+            option.value === "include" ? text("selectionModeInclude") : text("selectionModeExclude");
+        });
+        articleSelectionModeInput.value = currentValue;
+      }
+
       function renderSelectionModeHint() {
         selectionModeHint.textContent =
           normalizeSelectionMode(articleSelectionModeInput.value) === "include"
-            ? "In include mode, only the selected yellow passages will be used to build the article."
-            : "In exclude mode, selected text is marked in red and removed from the source material used for the article.";
+            ? text("selectionModeHintInclude")
+            : text("selectionModeHintExclude");
       }
 
       function renderArticlePreview() {
@@ -383,20 +664,62 @@
         const articleQuery = articleQueryInput.value.trim();
 
         if (!articleQuery) {
-          articlePreview.textContent = "Enter an article query that includes N.";
+          articlePreview.textContent = text("articlePreviewEmpty");
           return;
         }
 
         if (!/\bN\b/.test(articleQuery)) {
-          articlePreview.textContent = "The article query must include N so the configured word count can be inserted.";
+          articlePreview.textContent = text("articlePreviewNeedN");
           return;
         }
 
-        articlePreview.textContent = `Preview: ${articleQuery.replace(WORD_PLACEHOLDER_PATTERN, String(wordCount))}`;
+        articlePreview.textContent = text("articlePreviewValue", {
+          preview: articleQuery.replace(WORD_PLACEHOLDER_PATTERN, String(wordCount)),
+        });
+      }
+
+      function applyTranslations() {
+        document.documentElement.lang = currentLanguage;
+        document.title = text("documentTitle");
+        languageLabel.textContent = text("languageLabel");
+        navBriefing.textContent = text("navBriefing");
+        navConfig.textContent = text("navConfig");
+        pageTitle.textContent = text("pageTitle");
+        pageIntro.textContent = text("pageIntro");
+        modelLabel.textContent = text("modelLabel");
+        questionsLabel.textContent = text("questionsLabel");
+        addQuestionButton.setAttribute("aria-label", text("addQuestionAria"));
+        addQuestionText.textContent = text("addQuestionText");
+        articleQueryLabel.textContent = text("articleQueryLabel");
+        articleQueryInput.placeholder = text("articleQueryPlaceholder");
+        articleQueryHint.innerHTML = text("articleQueryHintHtml");
+        articleWordCountLabel.textContent = text("articleWordCountLabel");
+        articleSelectionModeLabel.textContent = text("articleSelectionModeLabel");
+        restartLabel.textContent = text("restartLabel");
+        restartHint.textContent = text("restartHint");
+        restartButton.textContent = text("restartButton");
+        saveButton.textContent = text("saveButton");
+        renderLanguageToggle();
+        renderModelHint();
+        renderSelectionModeOptions();
+        renderQuestions(collectQuestions());
+        renderSelectionModeHint();
+        renderArticlePreview();
+      }
+
+      function synchronizeDefaultContentOnLanguageChange(previousLanguage, nextLanguage) {
+        const currentQuestions = collectQuestions();
+        if (arraysEqual(currentQuestions, defaultQuestions(previousLanguage))) {
+          renderQuestions(defaultQuestions(nextLanguage));
+        }
+
+        if (articleQueryInput.value.trim() === defaultArticleQuery(previousLanguage)) {
+          articleQueryInput.value = defaultArticleQuery(nextLanguage);
+        }
       }
 
       async function loadConfig() {
-        status.textContent = "Loading current configuration...";
+        status.textContent = text("statusLoading");
 
         try {
           const response = await fetch("/api/config");
@@ -406,19 +729,16 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          renderModelOptions(payload.openai_model, payload.available_models);
-          renderQuestions(payload.questions);
-          articleQueryInput.value = payload.article_query;
+          currentLanguage = normalizeLanguage(payload.language);
+          currentModelsError = payload.models_error || null;
+          currentAvailableModels = Array.isArray(payload.available_models) ? payload.available_models : [];
+          renderModelOptions(payload.openai_model, currentAvailableModels);
+          renderQuestions(Array.isArray(payload.questions) ? payload.questions : []);
+          articleQueryInput.value = payload.article_query || defaultArticleQuery(currentLanguage);
           articleWordCountInput.value = payload.article_word_count;
           articleSelectionModeInput.value = normalizeSelectionMode(payload.article_selection_mode);
-          renderArticlePreview();
-          renderSelectionModeHint();
-
-          modelHint.textContent = payload.models_error
-            ? `Live model list unavailable: ${payload.models_error}`
-            : `${payload.available_models.length} model(s) available from OpenAI.`;
-
-          status.textContent = "Current configuration loaded.";
+          applyTranslations();
+          status.textContent = text("statusLoaded");
         } catch (error) {
           status.textContent = error.message;
         }
@@ -429,17 +749,17 @@
 
         const questions = collectQuestions();
         if (!questions.length) {
-          status.textContent = "Add at least one reporting question.";
+          status.textContent = text("statusNeedQuestion");
           return;
         }
 
         if (!/\bN\b/.test(articleQueryInput.value)) {
-          status.textContent = "Article query must include the placeholder N.";
+          status.textContent = text("statusNeedPlaceholderN");
           return;
         }
 
         saveButton.disabled = true;
-        status.textContent = "Saving configuration...";
+        status.textContent = text("statusSaving");
 
         try {
           const response = await fetch("/api/config", {
@@ -448,6 +768,7 @@
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
+              language: currentLanguage,
               openai_model: modelSelect.value,
               questions,
               article_query: articleQueryInput.value.trim(),
@@ -461,19 +782,16 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          renderModelOptions(payload.openai_model, payload.available_models);
-          renderQuestions(payload.questions);
-          articleQueryInput.value = payload.article_query;
+          currentLanguage = normalizeLanguage(payload.language);
+          currentModelsError = payload.models_error || null;
+          currentAvailableModels = Array.isArray(payload.available_models) ? payload.available_models : [];
+          renderModelOptions(payload.openai_model, currentAvailableModels);
+          renderQuestions(Array.isArray(payload.questions) ? payload.questions : []);
+          articleQueryInput.value = payload.article_query || defaultArticleQuery(currentLanguage);
           articleWordCountInput.value = payload.article_word_count;
           articleSelectionModeInput.value = normalizeSelectionMode(payload.article_selection_mode);
-          renderArticlePreview();
-          renderSelectionModeHint();
-
-          modelHint.textContent = payload.models_error
-            ? `Live model list unavailable: ${payload.models_error}`
-            : `${payload.available_models.length} model(s) available from OpenAI.`;
-
-          status.textContent = payload.message;
+          applyTranslations();
+          status.textContent = payload.message || text("statusLoaded");
         } catch (error) {
           status.textContent = error.message;
         } finally {
@@ -504,13 +822,13 @@
           await wait(RESTART_POLL_INTERVAL_MS);
         }
 
-        throw new Error("The app did not come back after restarting.");
+        throw new Error(text("restartTimeout"));
       }
 
       async function restartApp() {
         restartButton.disabled = true;
         saveButton.disabled = true;
-        status.textContent = "Re-initializing the app from a clean state...";
+        status.textContent = text("restartInProgress");
 
         try {
           const response = await fetch("/api/restart", {
@@ -527,7 +845,7 @@
           }
 
           sessionStorage.removeItem(BRIEFING_STORAGE_KEY);
-          status.textContent = payload.message || "Restarting the app...";
+          status.textContent = payload.message || text("restartFallback");
           await waitForServerRestart();
           window.location.href = "/";
         } catch (error) {
@@ -537,12 +855,27 @@
         }
       }
 
+      languageButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const nextLanguage = normalizeLanguage(button.dataset.language);
+          if (nextLanguage === currentLanguage) {
+            return;
+          }
+
+          const previousLanguage = currentLanguage;
+          currentLanguage = nextLanguage;
+          synchronizeDefaultContentOnLanguageChange(previousLanguage, nextLanguage);
+          applyTranslations();
+        });
+      });
+
       addQuestionButton.addEventListener("click", () => addQuestionRow());
       articleQueryInput.addEventListener("input", renderArticlePreview);
       articleWordCountInput.addEventListener("input", renderArticlePreview);
       articleSelectionModeInput.addEventListener("change", renderSelectionModeHint);
       restartButton.addEventListener("click", restartApp);
       form.addEventListener("submit", saveConfig);
+      applyTranslations();
       loadConfig();
     </script>
   </body>

@@ -1,4 +1,5 @@
 {
+  "language": "en",
   "article_query": "Write a news article of around N words. It should have the most general information first, and the more specific stuff after.",
   "article_word_count": 300,
   "article_selection_mode": "exclude",

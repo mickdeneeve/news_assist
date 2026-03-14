@@ -313,22 +313,22 @@
   <body>
     <main>
       <nav class="nav" aria-label="Primary">
-        <a class="active" href="/">Briefing</a>
-        <a href="/config">Configuration</a>
+        <a id="nav-briefing" class="active" href="/">Briefing</a>
+        <a id="nav-config" href="/config">Configuration</a>
       </nav>
 
-      <h1>Journalism Briefing Desk</h1>
-      <p>Enter a topic or event. The app will answer the reporting questions configured on the settings page.</p>
+      <h1 id="page-title">Journalism Briefing Desk</h1>
+      <p id="page-intro">Enter a topic or event. The app will answer the reporting questions configured on the settings page.</p>
 
       <section class="panel" aria-live="polite">
-        <p class="label">Configured Questions</p>
+        <p id="question-preview-label" class="label">Configured Questions</p>
         <ol id="question-preview">
           <li>Loading configured reporting questions...</li>
         </ol>
       </section>
 
       <form id="briefing-form">
-        <p class="label">Topic or Event</p>
+        <p id="query-label" class="label">Topic or Event</p>
         <textarea
           id="query"
           name="query"
@@ -343,7 +343,7 @@
       </form>
 
       <section class="panel" aria-live="polite">
-        <p class="label">Answers</p>
+        <p id="answers-label" class="label">Answers</p>
         <div id="answers">
           <div class="answer-card">
             <h2>Waiting</h2>
@@ -357,7 +357,7 @@
       </section>
 
       <section class="panel" aria-live="polite">
-        <p class="label">Sources Consulted</p>
+        <p id="sources-label" class="label">Sources Consulted</p>
         <ol id="sources">
           <li>Web search sources will appear here after a briefing is generated.</li>
         </ol>
@@ -374,7 +374,7 @@
       </section>
 
       <form id="article-form" class="panel">
-        <p class="label">Configured Article Request</p>
+        <p id="article-request-label" class="label">Configured Article Request</p>
         <p id="article-config-note" class="article-config-note">
           Loading the configured article request from the configuration page...
         </p>
@@ -385,79 +385,287 @@
         </div>
 
         <div class="panel">
-          <p class="label">Drafted Article</p>
+          <p id="article-draft-label" class="label">Drafted Article</p>
           <p id="article-draft">The assembled article will appear here.</p>
         </div>
       </form>
     </main>
 
     <script>
+      const COPY = {
+        en: {
+          documentTitle: "Journalism Briefing Desk",
+          navBriefing: "Briefing",
+          navConfig: "Configuration",
+          pageTitle: "Journalism Briefing Desk",
+          pageIntro:
+            "Enter a topic or event. The app will answer the reporting questions configured on the settings page.",
+          configuredQuestionsLabel: "Configured Questions",
+          questionPreviewLoading: "Loading configured reporting questions...",
+          topicLabel: "Topic or Event",
+          queryPlaceholder: "Example: The latest developments in the ceasefire talks",
+          buildBriefingButton: "Build Briefing",
+          ready: "Ready.",
+          answersLabel: "Answers",
+          waitingQuestion: "Waiting",
+          waitingAnswer: "Your reporting brief will appear here.",
+          highlightNoteInclude:
+            "Select text in any answer to include it in the article. Included passages are marked in yellow.",
+          highlightNoteExclude:
+            "Select text in any answer to exclude it from the article. Excluded passages are marked in red.",
+          sourcesLabel: "Sources Consulted",
+          sourcesAfterBriefing: "Web search sources will appear here after a briefing is generated.",
+          sourcesEmpty: "No web sources were returned for this briefing.",
+          includedExcerptsLabel: "Included Excerpts",
+          includedBeforeBriefing:
+            "The included material for each configured question will appear here after a briefing is generated.",
+          clearSelectionsButton: "Clear Selections",
+          configuredArticleRequestLabel: "Configured Article Request",
+          articleConfigLoading: "Loading the configured article request from the configuration page...",
+          articleConfigSummary: ({ description, query }) => `${description} Article request: ${query}`,
+          editConfigLink: "Edit this on the configuration page.",
+          assembleArticleButton: "Assemble Article",
+          articleStatusIncludeDefault: "Select passages to include, then draft the article.",
+          articleStatusExcludeDefault:
+            "Draft the article from the current briefing text, or mark passages in red to exclude them first.",
+          draftedArticleLabel: "Drafted Article",
+          articleDraftPlaceholder: "The assembled article will appear here.",
+          selectionChoiceInclude: "Include in yellow",
+          selectionChoiceExclude: "Exclude in red",
+          selectionEmptyInclude:
+            "No included passages yet. Select text in an answer to use it in the article.",
+          selectionEmptyExclude:
+            "No included material remains. Clear some red selections or exclude less text.",
+          selectionDescriptionInclude:
+            "Only the selected yellow passages will be used to assemble the article.",
+          selectionDescriptionExclude:
+            "Selected red passages will be removed before the article is assembled.",
+          selectionPastInclude: "included",
+          selectionPastExclude: "excluded",
+          selectionDuplicateInclude: "That passage is already included.",
+          selectionDuplicateExclude: "That passage is already excluded.",
+          answerLinksLabel: "Answer Links",
+          loadQuestionsFailed: ({ error }) => `Could not load the configured questions: ${error}`,
+          loadArticleRequestFailed: ({ error }) =>
+            `Could not load the configured article request: ${error}.`,
+          enterTopicFirst: "Enter a topic or event first.",
+          answeringQuestions: ({ count }) => `Answering ${count} reporting question(s)...`,
+          workingQuestion: "Working",
+          workingAnswer: "The briefing is being generated.",
+          briefingGenerated: ({ model }) => `Briefing generated with ${model} using web search.`,
+          requestFailedQuestion: "Request failed",
+          selectAtLeastOneYellow:
+            "Select at least one yellow passage to include before drafting an article.",
+          allExcluded:
+            "All briefing text is currently excluded. Clear some red selections before drafting an article.",
+          noUsableExcerpts: "No usable excerpt text is available for article drafting.",
+          draftingArticle: ({ count }) => `Drafting article from ${count} included excerpt(s)...`,
+          articleDrafted: ({ model, count }) =>
+            `Article drafted with ${model} from ${count} source excerpt(s).`,
+          modeLoaded: ({ choiceLabel }) =>
+            `${choiceLabel} mode loaded. Previous selections were cleared.`,
+          passageUpdated: ({ action }) => `Passage ${action}.`,
+        },
+        nl: {
+          documentTitle: "Journalistieke Briefingdesk",
+          navBriefing: "Briefing",
+          navConfig: "Configuratie",
+          pageTitle: "Journalistieke Briefingdesk",
+          pageIntro:
+            "Voer een onderwerp of gebeurtenis in. De app beantwoordt de verslaggeversvragen die op de configuratiepagina zijn ingesteld.",
+          configuredQuestionsLabel: "Ingestelde vragen",
+          questionPreviewLoading: "Ingestelde verslaggeversvragen worden geladen...",
+          topicLabel: "Onderwerp of gebeurtenis",
+          queryPlaceholder:
+            "Voorbeeld: De laatste ontwikkelingen in de gesprekken over een staakt-het-vuren",
+          buildBriefingButton: "Briefing maken",
+          ready: "Gereed.",
+          answersLabel: "Antwoorden",
+          waitingQuestion: "Wachten",
+          waitingAnswer: "Je journalistieke briefing verschijnt hier.",
+          highlightNoteInclude:
+            "Selecteer tekst in een antwoord om die in het artikel op te nemen. Opgenomen passages worden geel gemarkeerd.",
+          highlightNoteExclude:
+            "Selecteer tekst in een antwoord om die uit het artikel uit te sluiten. Uitgesloten passages worden rood gemarkeerd.",
+          sourcesLabel: "Geraadpleegde bronnen",
+          sourcesAfterBriefing:
+            "Bronnen uit web search verschijnen hier zodra er een briefing is gegenereerd.",
+          sourcesEmpty: "Er zijn geen webbronnen teruggegeven voor deze briefing.",
+          includedExcerptsLabel: "Opgenomen fragmenten",
+          includedBeforeBriefing:
+            "Het opgenomen materiaal per ingestelde vraag verschijnt hier zodra er een briefing is gegenereerd.",
+          clearSelectionsButton: "Selecties wissen",
+          configuredArticleRequestLabel: "Ingestelde artikelopdracht",
+          articleConfigLoading:
+            "De ingestelde artikelopdracht wordt geladen vanaf de configuratiepagina...",
+          articleConfigSummary: ({ description, query }) => `${description} Artikelopdracht: ${query}`,
+          editConfigLink: "Bewerk dit op de configuratiepagina.",
+          assembleArticleButton: "Artikel samenstellen",
+          articleStatusIncludeDefault:
+            "Selecteer passages om op te nemen en stel daarna het artikel op.",
+          articleStatusExcludeDefault:
+            "Stel het artikel op vanuit de huidige briefingtekst, of markeer eerst passages in rood om ze uit te sluiten.",
+          draftedArticleLabel: "Opgesteld artikel",
+          articleDraftPlaceholder: "Het samengestelde artikel verschijnt hier.",
+          selectionChoiceInclude: "Opnemen in geel",
+          selectionChoiceExclude: "Uitsluiten in rood",
+          selectionEmptyInclude:
+            "Nog geen opgenomen passages. Selecteer tekst in een antwoord om die in het artikel te gebruiken.",
+          selectionEmptyExclude:
+            "Er blijft geen opgenomen materiaal meer over. Wis enkele rode selecties of sluit minder tekst uit.",
+          selectionDescriptionInclude:
+            "Alleen de geselecteerde gele passages worden gebruikt om het artikel samen te stellen.",
+          selectionDescriptionExclude:
+            "Geselecteerde rode passages worden verwijderd voordat het artikel wordt samengesteld.",
+          selectionPastInclude: "opgenomen",
+          selectionPastExclude: "uitgesloten",
+          selectionDuplicateInclude: "Die passage is al opgenomen.",
+          selectionDuplicateExclude: "Die passage is al uitgesloten.",
+          answerLinksLabel: "Links bij het antwoord",
+          loadQuestionsFailed: ({ error }) =>
+            `De ingestelde vragen konden niet worden geladen: ${error}`,
+          loadArticleRequestFailed: ({ error }) =>
+            `De ingestelde artikelopdracht kon niet worden geladen: ${error}.`,
+          enterTopicFirst: "Voer eerst een onderwerp of gebeurtenis in.",
+          answeringQuestions: ({ count }) =>
+            `Verslaggeversvragen worden beantwoord (${count})...`,
+          workingQuestion: "Bezig",
+          workingAnswer: "De briefing wordt gegenereerd.",
+          briefingGenerated: ({ model }) => `Briefing gegenereerd met ${model} via web search.`,
+          requestFailedQuestion: "Aanvraag mislukt",
+          selectAtLeastOneYellow:
+            "Selecteer minstens een gele passage om op te nemen voordat je een artikel opstelt.",
+          allExcluded:
+            "Alle briefingtekst is nu uitgesloten. Wis enkele rode selecties voordat je een artikel opstelt.",
+          noUsableExcerpts:
+            "Er is geen bruikbare fragmenttekst beschikbaar om een artikel op te stellen.",
+          draftingArticle: ({ count }) =>
+            `Artikel wordt opgesteld uit ${count} opgenomen fragment(en)...`,
+          articleDrafted: ({ model, count }) =>
+            `Artikel opgesteld met ${model} op basis van ${count} bronfragment(en).`,
+          modeLoaded: ({ choiceLabel }) =>
+            `Modus ${choiceLabel} geladen. Eerdere selecties zijn gewist.`,
+          passageUpdated: ({ action }) => `Passage ${action}.`,
+        },
+      };
+
       const STORAGE_KEY = "news_assist_briefing_state";
+      const navBriefing = document.getElementById("nav-briefing");
+      const navConfig = document.getElementById("nav-config");
+      const pageTitle = document.getElementById("page-title");
+      const pageIntro = document.getElementById("page-intro");
+      const questionPreviewLabel = document.getElementById("question-preview-label");
       const form = document.getElementById("briefing-form");
+      const queryLabel = document.getElementById("query-label");
       const queryInput = document.getElementById("query");
       const sendButton = document.getElementById("send-button");
       const status = document.getElementById("status");
       const questionPreview = document.getElementById("question-preview");
+      const answersLabel = document.getElementById("answers-label");
       const answers = document.getElementById("answers");
       const sources = document.getElementById("sources");
+      const sourcesLabel = document.getElementById("sources-label");
       const highlightNote = document.getElementById("highlight-note");
       const selectionsLabel = document.getElementById("selections-label");
       const highlightsList = document.getElementById("highlights-list");
       const clearHighlightsButton = document.getElementById("clear-highlights");
       const articleForm = document.getElementById("article-form");
+      const articleRequestLabel = document.getElementById("article-request-label");
       const articleConfigNote = document.getElementById("article-config-note");
       const articleButton = document.getElementById("article-button");
       const articleStatus = document.getElementById("article-status");
+      const articleDraftLabel = document.getElementById("article-draft-label");
       const articleDraft = document.getElementById("article-draft");
       const DEFAULT_ARTICLE_SELECTION_MODE = "exclude";
-      const DEFAULT_ARTICLE_CONFIG_NOTE =
-        "Loading the configured article request from the configuration page...";
       const URL_PATTERN = /https?:\/\/[^\s<>()]+/gi;
+      let currentLanguage = "en";
+      let currentResolvedArticleQuery = "";
+
+      function normalizeLanguage(value) {
+        return value === "nl" ? "nl" : "en";
+      }
+
+      function text(key, params = {}) {
+        const entry = COPY[currentLanguage][key];
+        return typeof entry === "function" ? entry(params) : entry;
+      }
+
+      function defaultArticleConfigNote() {
+        return text("articleConfigLoading");
+      }
 
       function normalizeSelectionMode(value) {
         return value === "include" ? "include" : DEFAULT_ARTICLE_SELECTION_MODE;
       }
 
       function selectionModeHeading(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
-        return "Included Excerpts";
+        return text("includedExcerptsLabel");
       }
 
       function selectionModeChoiceLabel(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
-        return normalizeSelectionMode(mode) === "include" ? "Include in yellow" : "Exclude in red";
+        return normalizeSelectionMode(mode) === "include"
+          ? text("selectionChoiceInclude")
+          : text("selectionChoiceExclude");
       }
 
       function selectionModeEmptyMessage(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
         return normalizeSelectionMode(mode) === "include"
-          ? "No included passages yet. Select text in an answer to use it in the article."
-          : "No included material remains. Clear some red selections or exclude less text.";
+          ? text("selectionEmptyInclude")
+          : text("selectionEmptyExclude");
       }
 
       function selectionModeNote(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
         return normalizeSelectionMode(mode) === "include"
-          ? "Select text in any answer to include it in the article. Included passages are marked in yellow."
-          : "Select text in any answer to exclude it from the article. Excluded passages are marked in red.";
+          ? text("highlightNoteInclude")
+          : text("highlightNoteExclude");
       }
 
       function selectionModeDescription(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
         return normalizeSelectionMode(mode) === "include"
-          ? "Only the selected yellow passages will be used to assemble the article."
-          : "Selected red passages will be removed before the article is assembled.";
+          ? text("selectionDescriptionInclude")
+          : text("selectionDescriptionExclude");
       }
 
       function selectionModePastTense(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
-        return normalizeSelectionMode(mode) === "include" ? "included" : "excluded";
+        return normalizeSelectionMode(mode) === "include"
+          ? text("selectionPastInclude")
+          : text("selectionPastExclude");
       }
 
       function selectionModeDuplicateMessage(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
         return normalizeSelectionMode(mode) === "include"
-          ? "That passage is already included."
-          : "That passage is already excluded.";
+          ? text("selectionDuplicateInclude")
+          : text("selectionDuplicateExclude");
       }
 
       function defaultArticleStatus(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
         return normalizeSelectionMode(mode) === "include"
-          ? "Select passages to include, then draft the article."
-          : "Draft the article from the current briefing text, or mark passages in red to exclude them first.";
+          ? text("articleStatusIncludeDefault")
+          : text("articleStatusExcludeDefault");
+      }
+
+      function waitingAnswerItem() {
+        return {
+          question: text("waitingQuestion"),
+          answer: text("waitingAnswer"),
+          links: [],
+        };
+      }
+
+      function workingAnswerItem() {
+        return {
+          question: text("workingQuestion"),
+          answer: text("workingAnswer"),
+          links: [],
+        };
+      }
+
+      function requestFailedAnswerItem(message) {
+        return {
+          question: text("requestFailedQuestion"),
+          answer: message,
+          links: [],
+        };
       }
 
       function extractUrls(text) {
@@ -534,13 +742,7 @@
 
       function normalizeAnswerItems(items) {
         if (!Array.isArray(items) || !items.length) {
-          return [
-            {
-              question: "Waiting",
-              answer: "Your reporting brief will appear here.",
-              links: [],
-            },
-          ];
+          return [waitingAnswerItem()];
         }
 
         return items
@@ -551,11 +753,10 @@
 
       function defaultBriefingState() {
         return {
+          language: currentLanguage,
           query: "",
-          status: "Ready.",
-          answers: normalizeAnswerItems([
-            { question: "Waiting", answer: "Your reporting brief will appear here.", links: [] },
-          ]),
+          status: text("ready"),
+          answers: normalizeAnswerItems([waitingAnswerItem()]),
           sources: [],
           hasBriefing: false,
           highlights: [],
@@ -574,8 +775,9 @@
 
           const parsed = JSON.parse(raw);
           return {
+            language: normalizeLanguage(parsed.language),
             query: typeof parsed.query === "string" ? parsed.query : "",
-            status: typeof parsed.status === "string" ? parsed.status : "Ready.",
+            status: typeof parsed.status === "string" ? parsed.status : text("ready"),
             answers: normalizeAnswerItems(parsed.answers),
             sources: Array.isArray(parsed.sources) ? parsed.sources : [],
             hasBriefing: Boolean(parsed.hasBriefing),
@@ -593,6 +795,7 @@
       }
 
       let briefingState = loadBriefingState();
+      currentLanguage = normalizeLanguage(briefingState.language);
       let highlightNoteTimer = null;
 
       function persistBriefingState() {
@@ -600,7 +803,7 @@
       }
 
       function updateBriefingState(updates) {
-        briefingState = { ...briefingState, ...updates };
+        briefingState = { ...briefingState, ...updates, language: currentLanguage };
         persistBriefingState();
       }
 
@@ -795,7 +998,7 @@
 
             const linkLabel = document.createElement("p");
             linkLabel.className = "answer-links-label";
-            linkLabel.textContent = "Answer Links";
+            linkLabel.textContent = text("answerLinksLabel");
 
             const linkList = document.createElement("ol");
             linkList.className = "answer-links";
@@ -819,7 +1022,7 @@
         }
       }
 
-      function renderSources(items, emptyMessage = "No web sources were returned for this briefing.") {
+      function renderSources(items, emptyMessage = text("sourcesEmpty")) {
         sources.replaceChildren();
 
         if (!items.length) {
@@ -847,8 +1050,7 @@
 
         if (!briefingState.hasBriefing) {
           const item = document.createElement("li");
-          item.textContent =
-            "The included material for each configured question will appear here after a briefing is generated.";
+          item.textContent = text("includedBeforeBriefing");
           highlightsList.appendChild(item);
           return;
         }
@@ -880,22 +1082,99 @@
 
       function renderArticleDraft() {
         articleStatus.textContent = briefingState.articleStatus;
-        articleDraft.textContent = briefingState.articleDraft || "The assembled article will appear here.";
+        articleDraft.textContent = briefingState.articleDraft || text("articleDraftPlaceholder");
       }
 
       function renderArticleConfig(
-        query = DEFAULT_ARTICLE_CONFIG_NOTE,
+        query = currentResolvedArticleQuery || defaultArticleConfigNote(),
         selectionMode = briefingState.selectionMode
       ) {
+        currentResolvedArticleQuery = query;
         articleConfigNote.replaceChildren();
 
-        const summary = `${selectionModeDescription(selectionMode)} Article request: ${query}`;
-        const text = document.createTextNode(`${summary} `);
+        const summary = text("articleConfigSummary", {
+          description: selectionModeDescription(selectionMode),
+          query,
+        });
+        const summaryNode = document.createTextNode(`${summary} `);
         const link = document.createElement("a");
         link.href = "/config";
-        link.textContent = "Edit this on the configuration page.";
+        link.textContent = COPY[currentLanguage].editConfigLink;
 
-        articleConfigNote.append(text, link);
+        articleConfigNote.append(summaryNode, link);
+      }
+
+      function applyTranslations() {
+        document.documentElement.lang = currentLanguage;
+        document.title = text("documentTitle");
+        navBriefing.textContent = text("navBriefing");
+        navConfig.textContent = text("navConfig");
+        pageTitle.textContent = text("pageTitle");
+        pageIntro.textContent = text("pageIntro");
+        questionPreviewLabel.textContent = text("configuredQuestionsLabel");
+        queryLabel.textContent = text("topicLabel");
+        queryInput.placeholder = text("queryPlaceholder");
+        sendButton.textContent = text("buildBriefingButton");
+        status.textContent = briefingState.status;
+        answersLabel.textContent = text("answersLabel");
+        sourcesLabel.textContent = text("sourcesLabel");
+        clearHighlightsButton.textContent = text("clearSelectionsButton");
+        articleRequestLabel.textContent = text("configuredArticleRequestLabel");
+        articleButton.textContent = text("assembleArticleButton");
+        articleDraftLabel.textContent = text("draftedArticleLabel");
+        renderAnswers(briefingState.answers);
+        renderHighlights();
+        renderArticleDraft();
+        renderHighlightNote();
+        renderArticleConfig(currentResolvedArticleQuery || defaultArticleConfigNote(), briefingState.selectionMode);
+        if (briefingState.hasBriefing) {
+          renderSources(briefingState.sources);
+        } else {
+          renderSources([], text("sourcesAfterBriefing"));
+        }
+      }
+
+      function localizeStateForLanguage(previousLanguage, nextLanguage) {
+        const updates = { language: nextLanguage };
+        const readyValues = Object.values(COPY).map((entry) => entry.ready);
+        const defaultArticleStatuses = Object.values(COPY).flatMap((entry) => [
+          entry.articleStatusIncludeDefault,
+          entry.articleStatusExcludeDefault,
+        ]);
+        const waitingQuestions = Object.values(COPY).map((entry) => entry.waitingQuestion);
+        const waitingAnswers = Object.values(COPY).map((entry) => entry.waitingAnswer);
+
+        if (previousLanguage === nextLanguage) {
+          updateBriefingState(updates);
+          return;
+        }
+
+        if (readyValues.includes(briefingState.status)) {
+          updates.status = text("ready");
+        }
+
+        if (!briefingState.articleDraft && defaultArticleStatuses.includes(briefingState.articleStatus)) {
+          updates.articleStatus = defaultArticleStatus(briefingState.selectionMode);
+        }
+
+        if (
+          briefingState.answers.length === 1 &&
+          waitingQuestions.includes(briefingState.answers[0].question) &&
+          waitingAnswers.includes(briefingState.answers[0].answer)
+        ) {
+          updates.answers = normalizeAnswerItems([waitingAnswerItem()]);
+        }
+
+        if (!briefingState.hasBriefing) {
+          updates.status = text("ready");
+          updates.answers = normalizeAnswerItems([waitingAnswerItem()]);
+          updates.articleStatus = defaultArticleStatus(briefingState.selectionMode);
+          updates.articleDraft = "";
+          updateBriefingState(updates);
+          return;
+        }
+
+        updateBriefingState(updates);
       }
 
       function restoreBriefingState() {
@@ -905,12 +1184,12 @@
         renderHighlights();
         renderArticleDraft();
         renderHighlightNote();
-        renderArticleConfig();
+        renderArticleConfig(currentResolvedArticleQuery || defaultArticleConfigNote());
 
         if (briefingState.hasBriefing) {
           renderSources(briefingState.sources);
         } else {
-          renderSources([], "Web search sources will appear here after a briefing is generated.");
+          renderSources([], text("sourcesAfterBriefing"));
         }
       }
 
@@ -1084,7 +1363,7 @@
         clearTextSelection();
         renderHighlightNote(
           didStore
-            ? `Passage ${selectionModePastTense(briefingState.selectionMode)}.`
+            ? text("passageUpdated", { action: selectionModePastTense(briefingState.selectionMode) })
             : selectionModeDuplicateMessage(briefingState.selectionMode),
           true
         );
@@ -1099,6 +1378,9 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
+          const previousLanguage = currentLanguage;
+          currentLanguage = normalizeLanguage(payload.language);
+          localizeStateForLanguage(previousLanguage, currentLanguage);
           const nextSelectionMode = normalizeSelectionMode(payload.article_selection_mode);
           const selectionModeChanged = briefingState.selectionMode !== nextSelectionMode;
           const nextState = { selectionMode: nextSelectionMode };
@@ -1108,31 +1390,28 @@
             nextState.articleDraft = "";
           }
           updateBriefingState(nextState);
+          currentResolvedArticleQuery = payload.resolved_article_query || defaultArticleConfigNote();
+          applyTranslations();
           renderQuestionPreview(payload.questions);
           renderAnswers(briefingState.answers);
           renderHighlights();
           renderArticleDraft();
           renderHighlightNote();
-          renderArticleConfig(
-            payload.resolved_article_query || DEFAULT_ARTICLE_CONFIG_NOTE,
-            nextSelectionMode
-          );
+          renderArticleConfig(currentResolvedArticleQuery, nextSelectionMode);
 
           if (selectionModeChanged) {
             renderHighlightNote(
-              `${selectionModeChoiceLabel(nextSelectionMode)} mode loaded. Previous selections were cleared.`,
+              text("modeLoaded", { choiceLabel: selectionModeChoiceLabel(nextSelectionMode) }),
               true
             );
           }
         } catch (error) {
           questionPreview.replaceChildren();
           const item = document.createElement("li");
-          item.textContent = `Could not load the configured questions: ${error.message}`;
+          item.textContent = text("loadQuestionsFailed", { error: error.message });
           questionPreview.appendChild(item);
-          renderArticleConfig(
-            `Could not load the configured article request: ${error.message}.`,
-            briefingState.selectionMode
-          );
+          currentResolvedArticleQuery = text("loadArticleRequestFailed", { error: error.message });
+          renderArticleConfig(currentResolvedArticleQuery, briefingState.selectionMode);
         }
       }
 
@@ -1141,16 +1420,16 @@
 
         const query = queryInput.value.trim();
         if (!query) {
-          status.textContent = "Enter a topic or event first.";
+          status.textContent = text("enterTopicFirst");
           updateBriefingState({ query: queryInput.value, status: status.textContent });
           return;
         }
 
         const questionCount = questionPreview.children.length;
         sendButton.disabled = true;
-        status.textContent = `Answering ${questionCount} reporting question(s)...`;
-        renderAnswers(normalizeAnswerItems([{ question: "Working", answer: "The briefing is being generated." }]));
-        renderSources([], "Web search sources will appear here after a briefing is generated.");
+        status.textContent = text("answeringQuestions", { count: questionCount });
+        renderAnswers(normalizeAnswerItems([workingAnswerItem()]));
+        renderSources([], text("sourcesAfterBriefing"));
         renderHighlightNote();
         updateBriefingState({
           highlights: [],
@@ -1175,7 +1454,7 @@
           }
 
           const normalizedAnswers = normalizeAnswerItems(payload.answers);
-          status.textContent = `Briefing generated with ${payload.model} using web search.`;
+          status.textContent = text("briefingGenerated", { model: payload.model });
           updateBriefingState({
             query: queryInput.value,
             status: status.textContent,
@@ -1191,9 +1470,7 @@
           renderHighlights();
           renderArticleDraft();
         } catch (error) {
-          const failedAnswers = normalizeAnswerItems([
-            { question: "Request failed", answer: error.message, links: [] },
-          ]);
+          const failedAnswers = normalizeAnswerItems([requestFailedAnswerItem(error.message)]);
           status.textContent = error.message;
           updateBriefingState({
             query: queryInput.value,
@@ -1220,7 +1497,7 @@
         const excerpts = buildArticleExcerpts();
 
         if (briefingState.selectionMode === "include" && !briefingState.highlights.length) {
-          articleStatus.textContent = "Select at least one yellow passage to include before drafting an article.";
+          articleStatus.textContent = text("selectAtLeastOneYellow");
           updateBriefingState({ articleStatus: articleStatus.textContent });
           return;
         }
@@ -1228,14 +1505,14 @@
         if (!excerpts.length) {
           articleStatus.textContent =
             briefingState.selectionMode === "exclude"
-              ? "All briefing text is currently excluded. Clear some red selections before drafting an article."
-              : "No usable excerpt text is available for article drafting.";
+              ? text("allExcluded")
+              : text("noUsableExcerpts");
           updateBriefingState({ articleStatus: articleStatus.textContent });
           return;
         }
 
         articleButton.disabled = true;
-        articleStatus.textContent = `Drafting article from ${excerpts.length} included excerpt(s)...`;
+        articleStatus.textContent = text("draftingArticle", { count: excerpts.length });
 
         try {
           const response = await fetch("/api/article", {
@@ -1253,10 +1530,17 @@
             throw new Error(payload.error || `HTTP ${response.status}`);
           }
 
-          articleStatus.textContent = `Article drafted with ${payload.model} from ${payload.excerpt_count} source excerpt(s).`;
+          articleStatus.textContent = text("articleDrafted", {
+            model: payload.model,
+            count: payload.excerpt_count,
+          });
           articleDraft.textContent = payload.article;
           if (payload.article_query) {
-            renderArticleConfig(payload.article_query, payload.article_selection_mode || briefingState.selectionMode);
+            currentResolvedArticleQuery = payload.article_query;
+            renderArticleConfig(
+              currentResolvedArticleQuery,
+              payload.article_selection_mode || briefingState.selectionMode
+            );
           }
           updateBriefingState({
             articleStatus: articleStatus.textContent,
@@ -1264,7 +1548,7 @@
           });
         } catch (error) {
           articleStatus.textContent = error.message;
-          articleDraft.textContent = "The assembled article will appear here.";
+          articleDraft.textContent = text("articleDraftPlaceholder");
           updateBriefingState({
             articleStatus: articleStatus.textContent,
             articleDraft: "",
@@ -1291,6 +1575,7 @@
       });
       form.addEventListener("submit", submitBriefing);
       articleForm.addEventListener("submit", submitArticle);
+      applyTranslations();
       restoreBriefingState();
       loadConfig();
     </script>

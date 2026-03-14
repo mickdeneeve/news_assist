@@ -28,22 +28,109 @@ DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
 WATCHED_SUFFIXES = {".py"}
 IGNORED_DIRS = {".git", "__pycache__"}
 RESTART_EXIT_CODE = 75
-DEFAULT_REPORTING_QUESTIONS = [
-    "What happened, in one clear summary?",
-    "Who are the key people, organizations, or institutions involved?",
-    "Why does this matter right now?",
-    "What context or background does a reader need?",
-    "What remains unknown, disputed, or unverified?",
-]
-DEFAULT_ARTICLE_QUERY = (
-    "Write a news article of around N words. It should have the most general information first, "
-    "and the more specific stuff after."
-)
+DEFAULT_LANGUAGE = "en"
+SUPPORTED_LANGUAGES = {"en", "nl"}
+LOCALIZED_DEFAULT_REPORTING_QUESTIONS = {
+    "en": [
+        "What happened, in one clear summary?",
+        "Who are the key people, organizations, or institutions involved?",
+        "Why does this matter right now?",
+        "What context or background does a reader need?",
+        "What remains unknown, disputed, or unverified?",
+    ],
+    "nl": [
+        "Wat is er gebeurd, in een heldere samenvatting?",
+        "Wie zijn de belangrijkste personen, organisaties of instellingen die hierbij betrokken zijn?",
+        "Waarom is dit nu van belang?",
+        "Welke context of achtergrond heeft een lezer nodig?",
+        "Wat is nog onbekend, omstreden of niet geverifieerd?",
+    ],
+}
+LOCALIZED_DEFAULT_ARTICLE_QUERY = {
+    "en": (
+        "Write a news article of around N words. It should have the most general information first, "
+        "and the more specific stuff after."
+    ),
+    "nl": (
+        "Schrijf een nieuwsartikel van ongeveer N woorden. Zet de meest algemene informatie eerst "
+        "en de meer specifieke informatie daarna."
+    ),
+}
 DEFAULT_ARTICLE_WORD_COUNT = 300
 DEFAULT_ARTICLE_SELECTION_MODE = "exclude"
 ARTICLE_SELECTION_MODES = {"include", "exclude"}
 ARTICLE_WORD_PLACEHOLDER = "N"
 URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+BACKEND_TEXT = {
+    "en": {
+        "openai_error_default": "OpenAI request failed.",
+        "models_api_key_missing": "OPENAI_API_KEY is not configured on the server.",
+        "could_not_reach_openai": "Could not reach OpenAI: {reason}",
+        "hello_message": "Use the main page to brief a topic or event against your configured reporting questions.",
+        "route_not_found": "Route not found.",
+        "provide_topic": "Please provide a topic or event to investigate.",
+        "api_key_missing": "OPENAI_API_KEY is not set on the server.",
+        "no_text_output": "OpenAI returned no text output.",
+        "invalid_briefing_payload": "OpenAI returned an invalid briefing payload: {error}",
+        "no_excerpts": "No usable briefing text was provided for article drafting.",
+        "no_article_text": "OpenAI returned no article text.",
+        "model_empty": "OPENAI_MODEL cannot be empty.",
+        "add_question": "Add at least one reporting question.",
+        "article_query_placeholder": "Article query must include the placeholder N for the configured word count.",
+        "article_word_positive": "Article word count must be greater than zero.",
+        "config_saved": "Configuration saved.",
+        "restart_started": "App re-initialization started. Waiting for the server to restart.",
+        "invalid_content_length": "Invalid Content-Length header.",
+        "invalid_json": "Request body must be valid JSON.",
+        "json_object_required": "Request body must be a JSON object.",
+        "unexpected_answers_payload": "OpenAI returned an unexpected answers payload.",
+        "malformed_answer_entry": "OpenAI returned a malformed answer entry.",
+        "empty_answer": "OpenAI returned an empty answer.",
+    },
+    "nl": {
+        "openai_error_default": "OpenAI-aanvraag mislukt.",
+        "models_api_key_missing": "OPENAI_API_KEY is niet geconfigureerd op de server.",
+        "could_not_reach_openai": "Kon OpenAI niet bereiken: {reason}",
+        "hello_message": "Gebruik de hoofdpagina om een onderwerp of gebeurtenis te briefen aan de hand van je ingestelde verslaggeversvragen.",
+        "route_not_found": "Route niet gevonden.",
+        "provide_topic": "Geef eerst een onderwerp of gebeurtenis op.",
+        "api_key_missing": "OPENAI_API_KEY is niet ingesteld op de server.",
+        "no_text_output": "OpenAI gaf geen tekstuitvoer terug.",
+        "invalid_briefing_payload": "OpenAI gaf een ongeldige briefingpayload terug: {error}",
+        "no_excerpts": "Er is geen bruikbare briefingtekst opgegeven voor het opstellen van het artikel.",
+        "no_article_text": "OpenAI gaf geen artikeltekst terug.",
+        "model_empty": "OPENAI_MODEL mag niet leeg zijn.",
+        "add_question": "Voeg minstens een verslaggeversvraag toe.",
+        "article_query_placeholder": "De artikelopdracht moet de placeholder N bevatten voor het ingestelde woordenaantal.",
+        "article_word_positive": "Het woordenaantal voor het artikel moet groter zijn dan nul.",
+        "config_saved": "Configuratie opgeslagen.",
+        "restart_started": "De app wordt opnieuw geinitialiseerd. Wacht tot de server opnieuw is opgestart.",
+        "invalid_content_length": "Ongeldige Content-Length-header.",
+        "invalid_json": "De request-body moet geldige JSON zijn.",
+        "json_object_required": "De request-body moet een JSON-object zijn.",
+        "unexpected_answers_payload": "OpenAI gaf een onverwachte antwoordenpayload terug.",
+        "malformed_answer_entry": "OpenAI gaf een ongeldig antwoorditem terug.",
+        "empty_answer": "OpenAI gaf een leeg antwoord terug.",
+    },
+}
+
+
+def normalize_language(raw_language: object) -> str:
+    language = str(raw_language or "").strip().lower()
+    return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
+
+def localized_reporting_questions(language: str) -> list[str]:
+    return LOCALIZED_DEFAULT_REPORTING_QUESTIONS[normalize_language(language)].copy()
+
+
+def localized_article_query(language: str) -> str:
+    return LOCALIZED_DEFAULT_ARTICLE_QUERY[normalize_language(language)]
+
+
+def backend_text(language: str, key: str, **kwargs: object) -> str:
+    template = BACKEND_TEXT[normalize_language(language)].get(key, key)
+    return template.format(**kwargs)
 
 
 def parse_env_line(raw_line: str) -> tuple[str, str] | None:
@@ -125,9 +212,11 @@ def current_port() -> str:
 
 
 def default_reporting_config() -> dict[str, object]:
+    language = DEFAULT_LANGUAGE
     return {
-        "questions": DEFAULT_REPORTING_QUESTIONS.copy(),
-        "article_query": DEFAULT_ARTICLE_QUERY,
+        "language": language,
+        "questions": localized_reporting_questions(language),
+        "article_query": localized_article_query(language),
         "article_word_count": DEFAULT_ARTICLE_WORD_COUNT,
         "article_selection_mode": DEFAULT_ARTICLE_SELECTION_MODE,
     }
@@ -147,8 +236,7 @@ def normalize_questions(raw_questions: object) -> list[str]:
 
 
 def normalize_article_query(raw_query: object) -> str:
-    query = str(raw_query or "").strip()
-    return query or DEFAULT_ARTICLE_QUERY
+    return str(raw_query or "").strip()
 
 
 def normalize_article_word_count(raw_count: object) -> int:
@@ -166,7 +254,7 @@ def normalize_article_selection_mode(raw_mode: object) -> str:
 
 
 def render_article_query(article_query: str, word_count: int) -> str:
-    normalized_query = normalize_article_query(article_query)
+    normalized_query = str(article_query or "").strip()
     normalized_count = normalize_article_word_count(word_count)
 
     if re.search(rf"\b{re.escape(ARTICLE_WORD_PLACEHOLDER)}\b", normalized_query):
@@ -195,15 +283,19 @@ def read_reporting_config(path: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         return default_reporting_config()
 
+    language = normalize_language(payload.get("language"))
     questions = normalize_questions(payload.get("questions"))
     if not questions:
-        questions = DEFAULT_REPORTING_QUESTIONS.copy()
+        questions = localized_reporting_questions(language)
 
     article_query = normalize_article_query(payload.get("article_query"))
+    if not article_query:
+        article_query = localized_article_query(language)
     article_word_count = normalize_article_word_count(payload.get("article_word_count"))
     article_selection_mode = normalize_article_selection_mode(payload.get("article_selection_mode"))
 
     return {
+        "language": language,
         "questions": questions,
         "article_query": article_query,
         "article_word_count": article_word_count,
@@ -213,14 +305,17 @@ def read_reporting_config(path: Path) -> dict[str, object]:
 
 def write_reporting_config(
     path: Path,
+    language: str,
     questions: list[str],
     article_query: str,
     article_word_count: int,
     article_selection_mode: str,
 ) -> None:
+    normalized_language = normalize_language(language)
     payload = {
+        "language": normalized_language,
         "questions": questions,
-        "article_query": normalize_article_query(article_query),
+        "article_query": normalize_article_query(article_query) or localized_article_query(normalized_language),
         "article_word_count": normalize_article_word_count(article_word_count),
         "article_selection_mode": normalize_article_selection_mode(article_selection_mode),
     }
@@ -233,23 +328,26 @@ def ensure_local_reporting_config() -> None:
 
     write_reporting_config(
         REPORTING_CONFIG_FILE,
-        DEFAULT_REPORTING_QUESTIONS.copy(),
-        DEFAULT_ARTICLE_QUERY,
+        DEFAULT_LANGUAGE,
+        localized_reporting_questions(DEFAULT_LANGUAGE),
+        localized_article_query(DEFAULT_LANGUAGE),
         DEFAULT_ARTICLE_WORD_COUNT,
         DEFAULT_ARTICLE_SELECTION_MODE,
     )
 
 
-def extract_openai_error_message(raw_error: bytes) -> str:
+def extract_openai_error_message(raw_error: bytes, language: str) -> str:
     try:
         payload = json.loads(raw_error)
     except json.JSONDecodeError:
-        return raw_error.decode("utf-8", errors="replace") or "OpenAI request failed."
+        return raw_error.decode("utf-8", errors="replace") or backend_text(
+            language, "openai_error_default"
+        )
 
     error = payload.get("error")
     if isinstance(error, dict):
-        return str(error.get("message", "OpenAI request failed."))
-    return "OpenAI request failed."
+        return str(error.get("message", backend_text(language, "openai_error_default")))
+    return backend_text(language, "openai_error_default")
 
 
 def extract_output_text(payload: dict[str, object]) -> str:
@@ -268,11 +366,11 @@ def extract_output_text(payload: dict[str, object]) -> str:
     return "\n\n".join(pieces).strip()
 
 
-def fetch_available_models() -> tuple[list[str], str | None]:
+def fetch_available_models(language: str) -> tuple[list[str], str | None]:
     current = current_model()
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return [current], "OPENAI_API_KEY is not configured on the server."
+        return [current], backend_text(language, "models_api_key_missing")
 
     request = Request(
         OPENAI_MODELS_API_URL,
@@ -284,9 +382,9 @@ def fetch_available_models() -> tuple[list[str], str | None]:
         with urlopen(request, timeout=60) as response:
             payload = json.loads(response.read())
     except HTTPError as error:
-        return [current], extract_openai_error_message(error.read())
+        return [current], extract_openai_error_message(error.read(), language)
     except URLError as error:
-        return [current], f"Could not reach OpenAI: {error.reason}"
+        return [current], backend_text(language, "could_not_reach_openai", reason=error.reason)
 
     data = payload.get("data", [])
     models = sorted(
@@ -304,16 +402,32 @@ def fetch_available_models() -> tuple[list[str], str | None]:
     return models, None
 
 
-def build_briefing_prompt(topic: str, questions: list[str]) -> str:
+def build_briefing_prompt(topic: str, questions: list[str], language: str) -> str:
     numbered_questions = "\n".join(
         f"{index}. {question}" for index, question in enumerate(questions, start=1)
     )
+
+    if normalize_language(language) == "nl":
+        return (
+            "Je bent een journalistieke onderzoeksassistent. Gebruik web search om elke verslaggeversvraag over "
+            "het opgegeven onderwerp of de gebeurtenis te beantwoorden. Schrijf beknopte, feitelijke "
+            "briefingteksten voor een journalist. Wees expliciet over onzekerheid, maak onderscheid tussen wat "
+            "bekend is en wat onduidelijk blijft, en verzin geen bronnen, citaten of details. Antwoord in het "
+            "Nederlands. Geef uitsluitend geldige JSON terug, met exact deze structuur: "
+            '{"answers":[{"question":"<kopieer de oorspronkelijke vraag>","answer":"<antwoord zonder URLs>",'
+            '"links":["<relevante bron-url>"]}]}. Houd de vragen in dezelfde volgorde en neem elke vraag precies '
+            "een keer op. Zet bron-URLs alleen in de links-array, nooit in de antwoordtekst. Als een antwoord "
+            "geen relevante bron-url heeft, geef dan een lege links-array terug."
+            "\n\n"
+            f"Onderwerp of gebeurtenis:\n{topic}\n\n"
+            f"Verslaggeversvragen:\n{numbered_questions}\n"
+        )
 
     return (
         "You are a journalism research assistant. Use web search to answer each reporting question about the "
         "provided topic or event. Write concise, factual briefings for a reporter. Be explicit about uncertainty, "
         "distinguish what is known from what remains unclear, and do not invent sources, quotes, or details. "
-        "Return valid JSON only, with "
+        "Answer in English. Return valid JSON only, with "
         'this exact shape: {"answers":[{"question":"<copy the original question>","answer":"<answer with no URLs>",'
         '"links":["<relevant source url>"]}]}. Keep the questions in the same order and include every question '
         "exactly once. Put source URLs only in the links array, never inside the answer text. If an answer has no "
@@ -389,7 +503,7 @@ def split_answer_links(answer: str) -> tuple[str, list[str]]:
     return cleaned_answer or answer.strip(), unique_urls(trailing_urls)
 
 
-def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, object]]:
+def parse_briefing_output(text: str, questions: list[str], language: str) -> list[dict[str, object]]:
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = "\n".join(
@@ -404,20 +518,20 @@ def parse_briefing_output(text: str, questions: list[str]) -> list[dict[str, obj
     payload = json.loads(candidate)
     answers = payload.get("answers")
     if not isinstance(answers, list) or len(answers) != len(questions):
-        raise ValueError("OpenAI returned an unexpected answers payload.")
+        raise ValueError(backend_text(language, "unexpected_answers_payload"))
 
     normalized_answers: list[dict[str, object]] = []
     for question, item in zip(questions, answers):
         if not isinstance(item, dict):
-            raise ValueError("OpenAI returned a malformed answer entry.")
+            raise ValueError(backend_text(language, "malformed_answer_entry"))
 
         answer = str(item.get("answer", "")).strip()
         if not answer:
-            raise ValueError("OpenAI returned an empty answer.")
+            raise ValueError(backend_text(language, "empty_answer"))
 
         cleaned_answer, trailing_links = split_answer_links(answer)
         if not cleaned_answer:
-            raise ValueError("OpenAI returned an empty answer.")
+            raise ValueError(backend_text(language, "empty_answer"))
 
         explicit_links = normalize_answer_links(item.get("links"))
         normalized_answers.append(
@@ -450,17 +564,29 @@ def normalize_article_excerpts(raw_excerpts: object) -> list[dict[str, str]]:
     return normalized
 
 
-def build_article_prompt(article_query: str, excerpts: list[dict[str, str]]) -> str:
-    instruction = article_query.strip() or "Write a clear, publishable straight news article."
+def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], language: str) -> str:
+    instruction = article_query.strip() or localized_article_query(language)
     excerpt_block = "\n\n".join(
         f"Excerpt {index}\nQuestion: {item['question']}\nText: {item['text']}"
         for index, item in enumerate(excerpts, start=1)
     )
 
+    if normalize_language(language) == "nl":
+        return (
+            "Je bent een newsroom-assistent. Schrijf een nieuwsartikel met uitsluitend de opgegeven "
+            "bronfragmenten. Voeg geen feiten, citaten, toeschrijvingen, data, cijfers of context toe die niet "
+            "expliciet in de fragmenten staan. Laat belangrijke feiten weg als ze ontbreken, in plaats van te "
+            "gissen. Schrijf alleen de artikeltekst, in het Nederlands."
+            "\n\n"
+            f"Artikelopdracht:\n{instruction}\n\n"
+            f"Bronfragmenten:\n{excerpt_block}\n"
+        )
+
     return (
         "You are a newsroom writing assistant. Draft a news article using only the provided source excerpts. "
         "Do not add facts, quotes, attributions, dates, numbers, or context that are not explicitly present in the "
-        "excerpts. If important facts are missing, leave them out rather than guessing. Write only the article text."
+        "excerpts. If important facts are missing, leave them out rather than guessing. Write only the article text "
+        "in English."
         "\n\n"
         f"Article request:\n{instruction}\n\n"
         f"Source excerpts:\n{excerpt_block}\n"
@@ -606,13 +732,16 @@ class AppHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         route = urlparse(self.path).path
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        language = reporting_config["language"]
 
         if route == "/api/hello":
             self._send_json(
                 200,
                 {
-                    "message": "Use the main page to brief a topic or event against your configured reporting questions.",
+                    "message": backend_text(language, "hello_message"),
                     "model": current_model(),
+                    "language": language,
                 },
             )
             return
@@ -643,32 +772,35 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._handle_restart_request()
             return
 
-        self._send_json(404, {"error": "Route not found."})
+        self._send_json(404, {"error": backend_text(read_reporting_config(REPORTING_CONFIG_FILE)["language"], "route_not_found")})
 
     def _handle_briefing_request(self) -> None:
         payload = self._read_json_body()
         if payload is None:
             return
 
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        language = reporting_config["language"]
+
         topic = str(payload.get("query", "")).strip()
         if not topic:
-            self._send_json(400, {"error": "Please provide a topic or event to investigate."})
+            self._send_json(400, {"error": backend_text(language, "provide_topic")})
             return
 
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not api_key:
-            self._send_json(500, {"error": "OPENAI_API_KEY is not set on the server."})
+            self._send_json(500, {"error": backend_text(language, "api_key_missing")})
             return
 
         model = current_model()
-        reporting_questions = read_reporting_config(REPORTING_CONFIG_FILE)["questions"]
+        reporting_questions = reporting_config["questions"]
         request_body = json.dumps(
             {
                 "model": model,
                 "tools": [{"type": "web_search"}],
                 "tool_choice": "auto",
                 "include": ["web_search_call.action.sources"],
-                "input": build_briefing_prompt(topic, reporting_questions),
+                "input": build_briefing_prompt(topic, reporting_questions, language),
             }
         ).encode("utf-8")
         request = Request(
@@ -685,22 +817,24 @@ class AppHandler(SimpleHTTPRequestHandler):
             with urlopen(request, timeout=60) as response:
                 upstream_payload = json.loads(response.read())
         except HTTPError as error:
-            message = extract_openai_error_message(error.read())
+            message = extract_openai_error_message(error.read(), language)
             self._send_json(error.code, {"error": message})
             return
         except URLError as error:
-            self._send_json(502, {"error": f"Could not reach OpenAI: {error.reason}"})
+            self._send_json(
+                502, {"error": backend_text(language, "could_not_reach_openai", reason=error.reason)}
+            )
             return
 
         raw_output = extract_output_text(upstream_payload)
         if not raw_output:
-            self._send_json(502, {"error": "OpenAI returned no text output."})
+            self._send_json(502, {"error": backend_text(language, "no_text_output")})
             return
 
         try:
-            answers = parse_briefing_output(raw_output, reporting_questions)
+            answers = parse_briefing_output(raw_output, reporting_questions, language)
         except (ValueError, json.JSONDecodeError) as error:
-            self._send_json(502, {"error": f"OpenAI returned an invalid briefing payload: {error}"})
+            self._send_json(502, {"error": backend_text(language, "invalid_briefing_payload", error=error)})
             return
 
         sources = extract_web_search_sources(upstream_payload)
@@ -721,6 +855,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        language = reporting_config["language"]
         article_query = render_article_query(
             str(reporting_config["article_query"]),
             int(reporting_config["article_word_count"]),
@@ -731,17 +866,17 @@ class AppHandler(SimpleHTTPRequestHandler):
             excerpts = normalize_article_excerpts(payload.get("highlights"))
 
         if not excerpts:
-            self._send_json(400, {"error": "No usable briefing text was provided for article drafting."})
+            self._send_json(400, {"error": backend_text(language, "no_excerpts")})
             return
 
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not api_key:
-            self._send_json(500, {"error": "OPENAI_API_KEY is not set on the server."})
+            self._send_json(500, {"error": backend_text(language, "api_key_missing")})
             return
 
         model = current_model()
         request_body = json.dumps(
-            {"model": model, "input": build_article_prompt(article_query, excerpts)}
+            {"model": model, "input": build_article_prompt(article_query, excerpts, language)}
         ).encode("utf-8")
         request = Request(
             OPENAI_RESPONSES_API_URL,
@@ -757,16 +892,18 @@ class AppHandler(SimpleHTTPRequestHandler):
             with urlopen(request, timeout=60) as response:
                 upstream_payload = json.loads(response.read())
         except HTTPError as error:
-            message = extract_openai_error_message(error.read())
+            message = extract_openai_error_message(error.read(), language)
             self._send_json(error.code, {"error": message})
             return
         except URLError as error:
-            self._send_json(502, {"error": f"Could not reach OpenAI: {error.reason}"})
+            self._send_json(
+                502, {"error": backend_text(language, "could_not_reach_openai", reason=error.reason)}
+            )
             return
 
         article = extract_output_text(upstream_payload)
         if not article:
-            self._send_json(502, {"error": "OpenAI returned no article text."})
+            self._send_json(502, {"error": backend_text(language, "no_article_text")})
             return
 
         self._send_json(
@@ -786,27 +923,39 @@ class AppHandler(SimpleHTTPRequestHandler):
         if payload is None:
             return
 
+        current_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        previous_language = current_config["language"]
+        language = normalize_language(payload.get("language", previous_language))
         model = str(payload.get("openai_model", current_model())).strip()
         if not model:
-            self._send_json(400, {"error": "OPENAI_MODEL cannot be empty."})
+            self._send_json(400, {"error": backend_text(language, "model_empty")})
             return
 
         questions = normalize_questions(payload.get("questions"))
         if not questions:
-            self._send_json(400, {"error": "Add at least one reporting question."})
+            self._send_json(400, {"error": backend_text(language, "add_question")})
             return
 
         article_query = normalize_article_query(payload.get("article_query"))
+        if not article_query:
+            article_query = localized_article_query(language)
+
+        if language != previous_language:
+            if questions == localized_reporting_questions(previous_language):
+                questions = localized_reporting_questions(language)
+            if article_query == localized_article_query(previous_language):
+                article_query = localized_article_query(language)
+
         if not article_query_uses_placeholder(article_query):
             self._send_json(
                 400,
-                {"error": "Article query must include the placeholder N for the configured word count."},
+                {"error": backend_text(language, "article_query_placeholder")},
             )
             return
 
         article_word_count = normalize_article_word_count(payload.get("article_word_count"))
         if article_word_count <= 0:
-            self._send_json(400, {"error": "Article word count must be greater than zero."})
+            self._send_json(400, {"error": backend_text(language, "article_word_positive")})
             return
 
         article_selection_mode = normalize_article_selection_mode(payload.get("article_selection_mode"))
@@ -815,6 +964,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         os.environ["OPENAI_MODEL"] = model
         write_reporting_config(
             REPORTING_CONFIG_FILE,
+            language,
             questions,
             article_query,
             article_word_count,
@@ -822,14 +972,15 @@ class AppHandler(SimpleHTTPRequestHandler):
         )
 
         response_payload = self._config_payload()
-        response_payload["message"] = "Configuration saved."
+        response_payload["message"] = backend_text(language, "config_saved")
         self._send_json(200, response_payload)
 
     def _handle_restart_request(self) -> None:
+        language = read_reporting_config(REPORTING_CONFIG_FILE)["language"]
         self._send_json(
             202,
             {
-                "message": "App re-initialization started. Waiting for the server to restart.",
+                "message": backend_text(language, "restart_started"),
             },
         )
 
@@ -843,30 +994,33 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.server.shutdown()
 
     def _read_json_body(self) -> dict[str, object] | None:
+        language = read_reporting_config(REPORTING_CONFIG_FILE)["language"]
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            self._send_json(400, {"error": "Invalid Content-Length header."})
+            self._send_json(400, {"error": backend_text(language, "invalid_content_length")})
             return None
 
         raw_body = self.rfile.read(content_length)
         try:
             payload = json.loads(raw_body or b"{}")
         except json.JSONDecodeError:
-            self._send_json(400, {"error": "Request body must be valid JSON."})
+            self._send_json(400, {"error": backend_text(language, "invalid_json")})
             return None
 
         if not isinstance(payload, dict):
-            self._send_json(400, {"error": "Request body must be a JSON object."})
+            self._send_json(400, {"error": backend_text(language, "json_object_required")})
             return None
 
         return payload
 
     def _config_payload(self) -> dict[str, object]:
         reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
-        available_models, models_error = fetch_available_models()
+        language = reporting_config["language"]
+        available_models, models_error = fetch_available_models(language)
 
         return {
+            "language": language,
             "openai_model": current_model(),
             "available_models": available_models,
             "questions": reporting_config["questions"],
