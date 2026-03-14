@@ -170,12 +170,31 @@
         gap: 1rem;
       }
 
+      .field-actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+      }
+
       .save-button {
         border: 0;
         border-radius: 999px;
         padding: 0.85rem 1.4rem;
         background: linear-gradient(180deg, var(--accent), var(--accent-strong));
         color: white;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .secondary-button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.85rem 1.4rem;
+        background: rgba(24, 33, 38, 0.08);
+        color: var(--text);
         font: inherit;
         font-weight: 700;
         cursor: pointer;
@@ -247,6 +266,16 @@
           </p>
         </section>
 
+        <section class="field">
+          <label for="restart-button">App Re-initialization</label>
+          <p class="hint">
+            Clear the current briefing state in this tab and restart the local app so it comes back from a clean state.
+          </p>
+          <div class="field-actions">
+            <button id="restart-button" class="secondary-button" type="button">Re-initialize App</button>
+          </div>
+        </section>
+
         <div class="actions">
           <button id="save-button" class="save-button" type="submit">Save Configuration</button>
           <p id="status">Loading current configuration...</p>
@@ -265,9 +294,13 @@
       const articleSelectionModeInput = document.getElementById("article-selection-mode");
       const selectionModeHint = document.getElementById("selection-mode-hint");
       const addQuestionButton = document.getElementById("add-question");
+      const restartButton = document.getElementById("restart-button");
       const saveButton = document.getElementById("save-button");
       const status = document.getElementById("status");
+      const BRIEFING_STORAGE_KEY = "news_assist_briefing_state";
       const WORD_PLACEHOLDER_PATTERN = /\bN\b/g;
+      const RESTART_POLL_INTERVAL_MS = 500;
+      const RESTART_TIMEOUT_MS = 15000;
 
       function addQuestionRow(value = "") {
         const row = document.createElement("div");
@@ -448,10 +481,67 @@
         }
       }
 
+      function wait(delayMs) {
+        return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      }
+
+      async function waitForServerRestart() {
+        const deadline = Date.now() + RESTART_TIMEOUT_MS;
+
+        while (Date.now() < deadline) {
+          try {
+            const response = await fetch(`/api/hello?ts=${Date.now()}`, {
+              cache: "no-store",
+            });
+
+            if (response.ok) {
+              return;
+            }
+          } catch (error) {
+            // The restart window briefly takes the server offline.
+          }
+
+          await wait(RESTART_POLL_INTERVAL_MS);
+        }
+
+        throw new Error("The app did not come back after restarting.");
+      }
+
+      async function restartApp() {
+        restartButton.disabled = true;
+        saveButton.disabled = true;
+        status.textContent = "Re-initializing the app from a clean state...";
+
+        try {
+          const response = await fetch("/api/restart", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({}),
+          });
+
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          sessionStorage.removeItem(BRIEFING_STORAGE_KEY);
+          status.textContent = payload.message || "Restarting the app...";
+          await waitForServerRestart();
+          window.location.href = "/";
+        } catch (error) {
+          status.textContent = error.message;
+          restartButton.disabled = false;
+          saveButton.disabled = false;
+        }
+      }
+
       addQuestionButton.addEventListener("click", () => addQuestionRow());
       articleQueryInput.addEventListener("input", renderArticlePreview);
       articleWordCountInput.addEventListener("input", renderArticlePreview);
       articleSelectionModeInput.addEventListener("change", renderSelectionModeHint);
+      restartButton.addEventListener("click", restartApp);
       form.addEventListener("submit", saveConfig);
       loadConfig();
     </script>

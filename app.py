@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,6 +27,7 @@ RELOAD_ENV_VAR = "NEWS_ASSIST_RUN_SERVER"
 DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
 WATCHED_SUFFIXES = {".py"}
 IGNORED_DIRS = {".git", "__pycache__"}
+RESTART_EXIT_CODE = 75
 DEFAULT_REPORTING_QUESTIONS = [
     "What happened, in one clear summary?",
     "Who are the key people, organizations, or institutions involved?",
@@ -551,6 +553,13 @@ def run_with_reloader() -> None:
             time.sleep(1)
 
             if process.poll() is not None and not waiting_for_change:
+                if process.returncode == RESTART_EXIT_CODE:
+                    print("App restart requested. Restarting server...", flush=True)
+                    process = start_server_process()
+                    waiting_for_change = False
+                    snapshot = take_watch_snapshot()
+                    continue
+
                 print(
                     f"Server exited with code {process.returncode}. Waiting for a Python file change before restart.",
                     flush=True,
@@ -576,6 +585,15 @@ def run_with_reloader() -> None:
 
 load_dotenv(ENV_FILE)
 ensure_local_reporting_config()
+
+
+class RestartableHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self, server_address, request_handler_class):
+        super().__init__(server_address, request_handler_class)
+        self.restart_requested = False
 
 
 class AppHandler(SimpleHTTPRequestHandler):
@@ -619,6 +637,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         if route == "/api/config":
             self._handle_config_update()
+            return
+
+        if route == "/api/restart":
+            self._handle_restart_request()
             return
 
         self._send_json(404, {"error": "Route not found."})
@@ -803,6 +825,23 @@ class AppHandler(SimpleHTTPRequestHandler):
         response_payload["message"] = "Configuration saved."
         self._send_json(200, response_payload)
 
+    def _handle_restart_request(self) -> None:
+        self._send_json(
+            202,
+            {
+                "message": "App re-initialization started. Waiting for the server to restart.",
+            },
+        )
+
+        if hasattr(self.server, "restart_requested"):
+            self.server.restart_requested = True
+
+        threading.Thread(target=self._shutdown_server_after_response, daemon=True).start()
+
+    def _shutdown_server_after_response(self) -> None:
+        time.sleep(0.2)
+        self.server.shutdown()
+
     def _read_json_body(self) -> dict[str, object] | None:
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -861,9 +900,19 @@ class AppHandler(SimpleHTTPRequestHandler):
 
 def serve() -> None:
     port = int(current_port())
-    server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
+    server = RestartableHTTPServer(("127.0.0.1", port), AppHandler)
     print(f"Serving on http://127.0.0.1:{port}")
-    server.serve_forever()
+
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+    if server.restart_requested:
+        if os.environ.get(RELOAD_ENV_VAR) == "1":
+            raise SystemExit(RESTART_EXIT_CODE)
+
+        os.execve(sys.executable, [sys.executable, str(ROOT_DIR / "app.py")], os.environ.copy())
 
 
 def main() -> None:
