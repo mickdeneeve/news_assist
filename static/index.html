@@ -14,6 +14,8 @@
         --accent-strong: #0b4f4b;
         --muted: #5e6b73;
         --shadow: rgba(24, 33, 38, 0.12);
+        --included-excerpt-border: rgba(103, 141, 22, 0.28);
+        --included-excerpt-bg: rgba(234, 255, 190, 0.82);
       }
 
       * {
@@ -247,20 +249,20 @@
 
       .highlight-item {
         padding: 1rem 1.1rem;
-        border: 1px solid rgba(24, 33, 38, 0.08);
+        border: 1px solid var(--included-excerpt-border);
         border-radius: 18px;
-        background: rgba(255, 255, 255, 0.68);
+        background: var(--included-excerpt-bg);
         list-style: none;
       }
 
       .highlight-item-include {
-        border-color: rgba(168, 116, 0, 0.18);
-        background: rgba(255, 246, 196, 0.72);
+        border-color: var(--included-excerpt-border);
+        background: var(--included-excerpt-bg);
       }
 
       .highlight-item-exclude {
-        border-color: rgba(185, 28, 28, 0.16);
-        background: rgba(255, 236, 236, 0.82);
+        border-color: var(--included-excerpt-border);
+        background: var(--included-excerpt-bg);
       }
 
       .highlight-item p {
