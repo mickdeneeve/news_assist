@@ -10,7 +10,7 @@ import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -23,6 +23,7 @@ OPENAI_MODELS_API_URL = "https://api.openai.com/v1/models"
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_PORT = "8000"
 SERVER_INSTANCE_ID = f"{os.getpid()}-{time.time_ns()}"
+APP_USER_AGENT = "news-assist/1.0 (local journalism research tool)"
 CONFIG_KEYS = ("OPENAI_API_KEY", "OPENAI_MODEL", "PORT")
 RELOAD_ENV_VAR = "NEWS_ASSIST_RUN_SERVER"
 DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
@@ -71,7 +72,8 @@ DEFAULT_ARTICLE_WORD_COUNT = 300
 DEFAULT_ARTICLE_SELECTION_MODE = "exclude"
 ARTICLE_SELECTION_MODES = {"include", "exclude"}
 ARTICLE_WORD_PLACEHOLDER = "N"
-URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+WIKIPEDIA_LINK_CACHE: dict[tuple[str, str], str] = {}
 BACKEND_TEXT = {
     "en": {
         "openai_error_default": "OpenAI request failed.",
@@ -157,6 +159,13 @@ def edition_language(edition: str) -> str:
 
 def edition_region(edition: str) -> str:
     return str(edition_profile(edition)["region"])
+
+
+def preferred_wikipedia_language(edition: str) -> str | None:
+    normalized_edition = normalize_edition(edition)
+    if edition_region(normalized_edition) == "international":
+        return None
+    return edition_language(normalized_edition)
 
 
 def localized_reporting_questions(edition: str) -> list[str]:
@@ -489,9 +498,19 @@ def build_briefing_prompt(topic: str, questions: list[str], edition: str) -> str
 
 
 def extract_urls(text: str) -> list[str]:
+    def clean_url(candidate: str) -> str:
+        cleaned = candidate.rstrip(".,;:!?")
+        while cleaned.endswith(")") and cleaned.count(")") > cleaned.count("("):
+            cleaned = cleaned[:-1]
+        while cleaned.endswith("]") and cleaned.count("]") > cleaned.count("["):
+            cleaned = cleaned[:-1]
+        while cleaned.endswith("}") and cleaned.count("}") > cleaned.count("{"):
+            cleaned = cleaned[:-1]
+        return cleaned
+
     urls: list[str] = []
     for match in URL_PATTERN.finditer(text):
-        url = match.group(0).rstrip(".,);]")
+        url = clean_url(match.group(0))
         if url:
             urls.append(url)
     return urls
@@ -508,6 +527,117 @@ def unique_urls(urls: list[str]) -> list[str]:
         deduped.append(url)
 
     return deduped
+
+
+def wikipedia_article_title(url: str) -> tuple[str, str] | None:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if not host.endswith(".wikipedia.org"):
+        return None
+
+    if parsed.path.startswith("/wiki/"):
+        title = parsed.path[len("/wiki/") :]
+    else:
+        query = parse_qs(parsed.query)
+        values = query.get("title", [])
+        title = str(values[0]) if values else ""
+
+    title = title.strip()
+    if not title:
+        return None
+
+    return host, title.replace("_", " ")
+
+
+def resolve_wikipedia_language_variant(url: str, target_language: str | None) -> str:
+    normalized_language = str(target_language or "").strip().lower()
+    if not normalized_language:
+        return url
+
+    cache_key = (url, normalized_language)
+    if cache_key in WIKIPEDIA_LINK_CACHE:
+        return WIKIPEDIA_LINK_CACHE[cache_key]
+
+    article = wikipedia_article_title(url)
+    if article is None:
+        WIKIPEDIA_LINK_CACHE[cache_key] = url
+        return url
+
+    host, title = article
+    current_language = host.split(".", 1)[0]
+    if current_language == normalized_language:
+        WIKIPEDIA_LINK_CACHE[cache_key] = url
+        return url
+
+    api_url = (
+        f"https://{host}/w/api.php?"
+        + urlencode(
+            {
+                "action": "query",
+                "titles": title,
+                "prop": "langlinks",
+                "lllang": normalized_language,
+                "lllimit": 1,
+                "llprop": "url",
+                "redirects": 1,
+                "format": "json",
+                "formatversion": 2,
+            }
+        )
+    )
+    request = Request(
+        api_url,
+        method="GET",
+        headers={"User-Agent": APP_USER_AGENT},
+    )
+
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read())
+    except (HTTPError, URLError, json.JSONDecodeError, TimeoutError, OSError):
+        WIKIPEDIA_LINK_CACHE[cache_key] = url
+        return url
+
+    pages = payload.get("query", {}).get("pages", [])
+    if not isinstance(pages, list):
+        WIKIPEDIA_LINK_CACHE[cache_key] = url
+        return url
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+
+        langlinks = page.get("langlinks", [])
+        if not isinstance(langlinks, list):
+            continue
+
+        for langlink in langlinks:
+            if not isinstance(langlink, dict):
+                continue
+
+            resolved_url = str(langlink.get("url", "")).strip()
+            if resolved_url:
+                WIKIPEDIA_LINK_CACHE[cache_key] = resolved_url
+                return resolved_url
+
+            resolved_title = str(langlink.get("title", "") or langlink.get("*", "")).strip()
+            if resolved_title:
+                resolved_url = (
+                    f"https://{normalized_language}.wikipedia.org/wiki/"
+                    f"{quote(resolved_title.replace(' ', '_'), safe=':/()')}"
+                )
+                WIKIPEDIA_LINK_CACHE[cache_key] = resolved_url
+                return resolved_url
+
+    WIKIPEDIA_LINK_CACHE[cache_key] = url
+    return url
+
+
+def normalize_links_for_edition(urls: list[str], edition: str) -> list[str]:
+    target_language = preferred_wikipedia_language(edition)
+    return unique_urls(
+        [resolve_wikipedia_language_variant(url, target_language) for url in urls]
+    )
 
 
 def normalize_answer_links(raw_links: object) -> list[str]:
@@ -553,7 +683,8 @@ def split_answer_links(answer: str) -> tuple[str, list[str]]:
     return cleaned_answer or answer.strip(), unique_urls(trailing_urls)
 
 
-def parse_briefing_output(text: str, questions: list[str], language: str) -> list[dict[str, object]]:
+def parse_briefing_output(text: str, questions: list[str], edition: str) -> list[dict[str, object]]:
+    language = edition_language(edition)
     candidate = text.strip()
     if candidate.startswith("```"):
         candidate = "\n".join(
@@ -588,7 +719,7 @@ def parse_briefing_output(text: str, questions: list[str], language: str) -> lis
             {
                 "question": question,
                 "answer": cleaned_answer,
-                "links": unique_urls(explicit_links + trailing_links),
+                "links": normalize_links_for_edition(explicit_links + trailing_links, edition),
             }
         )
 
@@ -643,7 +774,7 @@ def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], edi
     )
 
 
-def extract_web_search_sources(payload: dict[str, object]) -> list[dict[str, str]]:
+def extract_web_search_sources(payload: dict[str, object], edition: str) -> list[dict[str, str]]:
     seen_urls: set[str] = set()
     sources: list[dict[str, str]] = []
 
@@ -663,7 +794,10 @@ def extract_web_search_sources(payload: dict[str, object]) -> list[dict[str, str
             if not isinstance(source, dict):
                 continue
 
-            url = str(source.get("url", "")).strip()
+            url = resolve_wikipedia_language_variant(
+                str(source.get("url", "")).strip(),
+                preferred_wikipedia_language(edition),
+            )
             title = str(source.get("title", "")).strip()
             if not url or url in seen_urls:
                 continue
@@ -885,12 +1019,12 @@ class AppHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            answers = parse_briefing_output(raw_output, reporting_questions, language)
+            answers = parse_briefing_output(raw_output, reporting_questions, edition)
         except (ValueError, json.JSONDecodeError) as error:
             self._send_json(502, {"error": backend_text(language, "invalid_briefing_payload", error=error)})
             return
 
-        sources = extract_web_search_sources(upstream_payload)
+        sources = extract_web_search_sources(upstream_payload, edition)
 
         self._send_json(
             200,

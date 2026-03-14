@@ -586,7 +586,7 @@
       const articleDraftLabel = document.getElementById("article-draft-label");
       const articleDraft = document.getElementById("article-draft");
       const DEFAULT_ARTICLE_SELECTION_MODE = "exclude";
-      const URL_PATTERN = /https?:\/\/[^\s<>()]+/gi;
+      const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
       let currentEdition = DEFAULT_EDITION;
       let currentLanguage = "en";
       let currentResolvedArticleQuery = "";
@@ -692,7 +692,21 @@
 
       function extractUrls(text) {
         const matches = String(text || "").match(URL_PATTERN) || [];
-        return matches.map((url) => url.replace(/[.,);]+$/g, ""));
+        return matches
+          .map((url) => {
+            let cleaned = url.replace(/[.,;:!?]+$/g, "");
+            while (cleaned.endsWith(")") && (cleaned.match(/\)/g) || []).length > (cleaned.match(/\(/g) || []).length) {
+              cleaned = cleaned.slice(0, -1);
+            }
+            while (cleaned.endsWith("]") && (cleaned.match(/\]/g) || []).length > (cleaned.match(/\[/g) || []).length) {
+              cleaned = cleaned.slice(0, -1);
+            }
+            while (cleaned.endsWith("}") && (cleaned.match(/\}/g) || []).length > (cleaned.match(/\{/g) || []).length) {
+              cleaned = cleaned.slice(0, -1);
+            }
+            return cleaned;
+          })
+          .filter(Boolean);
       }
 
       function uniqueUrls(urls) {
