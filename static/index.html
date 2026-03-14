@@ -86,6 +86,18 @@
         background: rgba(255, 255, 255, 0.56);
       }
 
+      .mismatch-banner {
+        border-color: rgba(182, 126, 27, 0.22);
+        background:
+          linear-gradient(180deg, rgba(255, 248, 223, 0.92), rgba(255, 252, 247, 0.88));
+      }
+
+      .mismatch-body {
+        margin: 0.2rem 0 0;
+        color: var(--text);
+        line-height: 1.55;
+      }
+
       .label {
         margin: 0 0 0.8rem;
         font-size: 0.8rem;
@@ -320,6 +332,16 @@
       <h1 id="page-title">Journalism Briefing Desk</h1>
       <p id="page-intro">Enter a topic or event. The app will answer the reporting questions configured on the settings page.</p>
 
+      <section id="mismatch-banner" class="panel mismatch-banner" hidden>
+        <p id="mismatch-label" class="label">Edition mismatch</p>
+        <p id="mismatch-body" class="mismatch-body"></p>
+        <div class="actions">
+          <button type="button" id="keep-snapshot" class="secondary">Keep current snapshot</button>
+          <button type="button" id="translate-snapshot" class="secondary">Translate snapshot</button>
+          <button type="button" id="rebuild-snapshot">Rebuild briefing</button>
+        </div>
+      </section>
+
       <section class="panel" aria-live="polite">
         <p id="question-preview-label" class="label">Configured Questions</p>
         <ol id="question-preview">
@@ -432,6 +454,21 @@
           articleDraftPlaceholder: "The assembled article will appear here.",
           selectionChoiceInclude: "Include in yellow",
           selectionChoiceExclude: "Exclude in red",
+          editionInternational: "International (English)",
+          editionNetherlands: "Netherlands (Dutch)",
+          languageEnglish: "English",
+          languageDutch: "Dutch",
+          mismatchLabel: "Edition Mismatch",
+          mismatchBody: ({ currentEdition, snapshotEdition, renderedLanguage }) =>
+            `Current edition is ${currentEdition}. The visible snapshot was generated for ${snapshotEdition} and is currently rendered in ${renderedLanguage}. Translate it for on-screen reading, or rebuild if you want sourcing aligned with the current edition.`,
+          mismatchBodyTranslated: ({ currentEdition, snapshotEdition, renderedLanguage }) =>
+            `Current edition is ${currentEdition}. The visible snapshot was generated for ${snapshotEdition} and translated into ${renderedLanguage}. Rebuild if you want sourcing aligned with the current edition.`,
+          mismatchKeepButton: "Keep Current Snapshot",
+          mismatchTranslateButton: ({ language }) => `Translate Snapshot to ${language}`,
+          mismatchRebuildButton: ({ edition }) => `Rebuild in ${edition}`,
+          mismatchTranslating: ({ language }) => `Translating snapshot to ${language}...`,
+          mismatchTranslatedStatus: ({ language }) =>
+            `Snapshot translated to ${language}. Rebuild if you want sources aligned with the current edition.`,
           selectionEmptyInclude:
             "No included passages yet. Select text in an answer to use it in the article.",
           selectionEmptyExclude:
@@ -509,6 +546,21 @@
           articleDraftPlaceholder: "Het samengestelde artikel verschijnt hier.",
           selectionChoiceInclude: "Opnemen in geel",
           selectionChoiceExclude: "Uitsluiten in rood",
+          editionInternational: "Internationaal (Engels)",
+          editionNetherlands: "Nederland (Nederlands)",
+          languageEnglish: "Engels",
+          languageDutch: "Nederlands",
+          mismatchLabel: "Editiemismatch",
+          mismatchBody: ({ currentEdition, snapshotEdition, renderedLanguage }) =>
+            `De huidige editie is ${currentEdition}. De zichtbare snapshot is gegenereerd voor ${snapshotEdition} en wordt nu weergegeven in het ${renderedLanguage}. Vertaal die voor weergave, of bouw opnieuw op als je bronnen wilt die bij de huidige editie passen.`,
+          mismatchBodyTranslated: ({ currentEdition, snapshotEdition, renderedLanguage }) =>
+            `De huidige editie is ${currentEdition}. De zichtbare snapshot is gegenereerd voor ${snapshotEdition} en vertaald naar het ${renderedLanguage}. Bouw opnieuw op als je bronnen wilt die bij de huidige editie passen.`,
+          mismatchKeepButton: "Huidige snapshot behouden",
+          mismatchTranslateButton: ({ language }) => `Snapshot vertalen naar ${language}`,
+          mismatchRebuildButton: ({ edition }) => `Opnieuw opbouwen in ${edition}`,
+          mismatchTranslating: ({ language }) => `Snapshot wordt vertaald naar het ${language}...`,
+          mismatchTranslatedStatus: ({ language }) =>
+            `Snapshot vertaald naar het ${language}. Bouw opnieuw op als je bronnen wilt die bij de huidige editie passen.`,
           selectionEmptyInclude:
             "Nog geen opgenomen passages. Selecteer tekst in een antwoord om die in het artikel te gebruiken.",
           selectionEmptyExclude:
@@ -563,6 +615,12 @@
       const navConfig = document.getElementById("nav-config");
       const pageTitle = document.getElementById("page-title");
       const pageIntro = document.getElementById("page-intro");
+      const mismatchBanner = document.getElementById("mismatch-banner");
+      const mismatchLabel = document.getElementById("mismatch-label");
+      const mismatchBody = document.getElementById("mismatch-body");
+      const keepSnapshotButton = document.getElementById("keep-snapshot");
+      const translateSnapshotButton = document.getElementById("translate-snapshot");
+      const rebuildSnapshotButton = document.getElementById("rebuild-snapshot");
       const questionPreviewLabel = document.getElementById("question-preview-label");
       const form = document.getElementById("briefing-form");
       const queryLabel = document.getElementById("query-label");
@@ -588,8 +646,9 @@
       const DEFAULT_ARTICLE_SELECTION_MODE = "exclude";
       const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
       let currentEdition = DEFAULT_EDITION;
-      let currentLanguage = "en";
+      let currentLanguage = editionLanguage(DEFAULT_EDITION);
       let currentResolvedArticleQuery = "";
+      let hasLoadedConfig = false;
 
       function normalizeLanguage(value) {
         return value === "nl" ? "nl" : "en";
@@ -610,6 +669,16 @@
       function text(key, params = {}) {
         const entry = COPY[currentLanguage][key];
         return typeof entry === "function" ? entry(params) : entry;
+      }
+
+      function editionLabelFor(edition) {
+        return normalizeEdition(edition) === "netherlands_nl"
+          ? text("editionNetherlands")
+          : text("editionInternational");
+      }
+
+      function languageLabelFor(language) {
+        return normalizeLanguage(language) === "nl" ? text("languageDutch") : text("languageEnglish");
       }
 
       function defaultArticleConfigNote() {
@@ -790,7 +859,8 @@
       function defaultBriefingState() {
         return {
           edition: currentEdition,
-          language: currentLanguage,
+          snapshotLanguage: currentLanguage,
+          dismissedMismatchSignature: "",
           query: "",
           status: text("ready"),
           answers: normalizeAnswerItems([waitingAnswerItem()]),
@@ -814,7 +884,13 @@
           const edition = normalizeEdition(parsed.edition || parsed.language);
           return {
             edition,
-            language: editionLanguage(edition),
+            snapshotLanguage: normalizeLanguage(
+              parsed.snapshotLanguage || parsed.language || editionLanguage(edition)
+            ),
+            dismissedMismatchSignature:
+              typeof parsed.dismissedMismatchSignature === "string"
+                ? parsed.dismissedMismatchSignature
+                : "",
             query: typeof parsed.query === "string" ? parsed.query : "",
             status: typeof parsed.status === "string" ? parsed.status : text("ready"),
             answers: normalizeAnswerItems(parsed.answers),
@@ -834,8 +910,6 @@
       }
 
       let briefingState = loadBriefingState();
-      currentEdition = normalizeEdition(briefingState.edition || briefingState.language);
-      currentLanguage = editionLanguage(currentEdition);
       let highlightNoteTimer = null;
 
       function persistBriefingState() {
@@ -843,12 +917,7 @@
       }
 
       function updateBriefingState(updates) {
-        briefingState = {
-          ...briefingState,
-          ...updates,
-          edition: currentEdition,
-          language: currentLanguage,
-        };
+        briefingState = { ...briefingState, ...updates };
         persistBriefingState();
       }
 
@@ -972,13 +1041,71 @@
 
       briefingState = {
         ...briefingState,
-        edition: currentEdition,
-        language: currentLanguage,
+        edition: normalizeEdition(briefingState.edition),
+        snapshotLanguage: normalizeLanguage(
+          briefingState.snapshotLanguage || editionLanguage(briefingState.edition)
+        ),
         answers: normalizeAnswerItems(briefingState.answers),
         selectionMode: normalizeSelectionMode(briefingState.selectionMode),
         highlights: normalizeStoredHighlights(briefingState.highlights, briefingState.answers),
       };
       persistBriefingState();
+
+      function currentMismatchSignature() {
+        return `${normalizeEdition(briefingState.edition)}|${normalizeLanguage(
+          briefingState.snapshotLanguage
+        )}|${currentEdition}`;
+      }
+
+      function hasEditionMismatch() {
+        return briefingState.hasBriefing && normalizeEdition(briefingState.edition) !== currentEdition;
+      }
+
+      function renderMismatchBanner() {
+        if (!hasLoadedConfig) {
+          mismatchBanner.hidden = true;
+          return;
+        }
+
+        if (!hasEditionMismatch()) {
+          mismatchBanner.hidden = true;
+          return;
+        }
+
+        const signature = currentMismatchSignature();
+        if (briefingState.dismissedMismatchSignature === signature) {
+          mismatchBanner.hidden = true;
+          return;
+        }
+
+        const snapshotEdition = editionLabelFor(briefingState.edition);
+        const currentEditionLabel = editionLabelFor(currentEdition);
+        const renderedLanguage = languageLabelFor(briefingState.snapshotLanguage);
+        const translated = normalizeLanguage(briefingState.snapshotLanguage) === currentLanguage;
+
+        mismatchBanner.hidden = false;
+        mismatchLabel.textContent = text("mismatchLabel");
+        mismatchBody.textContent = translated
+          ? text("mismatchBodyTranslated", {
+              currentEdition: currentEditionLabel,
+              snapshotEdition,
+              renderedLanguage,
+            })
+          : text("mismatchBody", {
+              currentEdition: currentEditionLabel,
+              snapshotEdition,
+              renderedLanguage,
+            });
+        keepSnapshotButton.textContent = text("mismatchKeepButton");
+        translateSnapshotButton.textContent = text("mismatchTranslateButton", {
+          language: languageLabelFor(currentLanguage),
+        });
+        translateSnapshotButton.hidden =
+          normalizeLanguage(briefingState.snapshotLanguage) === currentLanguage;
+        rebuildSnapshotButton.textContent = text("mismatchRebuildButton", {
+          edition: currentEditionLabel,
+        });
+      }
 
       function buildAnswerFragment(question, answerText) {
         const fragment = document.createDocumentFragment();
@@ -1173,6 +1300,7 @@
         renderHighlights();
         renderArticleDraft();
         renderHighlightNote();
+        renderMismatchBanner();
         renderArticleConfig(currentResolvedArticleQuery || defaultArticleConfigNote(), briefingState.selectionMode);
         if (briefingState.hasBriefing) {
           renderSources(briefingState.sources);
@@ -1182,7 +1310,6 @@
       }
 
       function localizeStateForLanguage(previousLanguage, nextLanguage) {
-        const updates = { language: nextLanguage };
         const readyValues = Object.values(COPY).map((entry) => entry.ready);
         const defaultArticleStatuses = Object.values(COPY).flatMap((entry) => [
           entry.articleStatusIncludeDefault,
@@ -1192,9 +1319,10 @@
         const waitingAnswers = Object.values(COPY).map((entry) => entry.waitingAnswer);
 
         if (previousLanguage === nextLanguage) {
-          updateBriefingState(updates);
           return;
         }
+
+        const updates = {};
 
         if (readyValues.includes(briefingState.status)) {
           updates.status = text("ready");
@@ -1231,6 +1359,7 @@
         renderHighlights();
         renderArticleDraft();
         renderHighlightNote();
+        renderMismatchBanner();
         renderArticleConfig(currentResolvedArticleQuery || defaultArticleConfigNote());
 
         if (briefingState.hasBriefing) {
@@ -1429,14 +1558,15 @@
           const previousLanguage = currentLanguage;
           currentEdition = nextEdition;
           currentLanguage = editionLanguage(currentEdition);
+          hasLoadedConfig = true;
           localizeStateForLanguage(previousLanguage, currentLanguage);
           const nextSelectionMode = normalizeSelectionMode(payload.article_selection_mode);
           const selectionModeChanged = briefingState.selectionMode !== nextSelectionMode;
-          const nextState = {
-            edition: currentEdition,
-            language: currentLanguage,
-            selectionMode: nextSelectionMode,
-          };
+          const nextState = { selectionMode: nextSelectionMode };
+          if (!briefingState.hasBriefing) {
+            nextState.edition = currentEdition;
+            nextState.snapshotLanguage = currentLanguage;
+          }
           if (selectionModeChanged) {
             nextState.highlights = [];
             nextState.articleStatus = defaultArticleStatus(nextSelectionMode);
@@ -1450,6 +1580,7 @@
           renderHighlights();
           renderArticleDraft();
           renderHighlightNote();
+          renderMismatchBanner();
           renderArticleConfig(currentResolvedArticleQuery, nextSelectionMode);
 
           if (selectionModeChanged) {
@@ -1509,6 +1640,9 @@
           const normalizedAnswers = normalizeAnswerItems(payload.answers);
           status.textContent = text("briefingGenerated", { model: payload.model });
           updateBriefingState({
+            edition: currentEdition,
+            snapshotLanguage: currentLanguage,
+            dismissedMismatchSignature: "",
             query: queryInput.value,
             status: status.textContent,
             answers: normalizedAnswers,
@@ -1526,6 +1660,9 @@
           const failedAnswers = normalizeAnswerItems([requestFailedAnswerItem(error.message)]);
           status.textContent = error.message;
           updateBriefingState({
+            edition: currentEdition,
+            snapshotLanguage: currentLanguage,
+            dismissedMismatchSignature: "",
             query: queryInput.value,
             status: status.textContent,
             answers: failedAnswers,
@@ -1619,10 +1756,90 @@
         renderHighlightNote();
       });
 
+      async function translateSnapshot() {
+        if (!briefingState.hasBriefing) {
+          return;
+        }
+
+        translateSnapshotButton.disabled = true;
+        rebuildSnapshotButton.disabled = true;
+        keepSnapshotButton.disabled = true;
+        status.textContent = text("mismatchTranslating", {
+          language: languageLabelFor(currentLanguage),
+        });
+
+        try {
+          const response = await fetch("/api/translate-snapshot", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              snapshot_edition: briefingState.edition,
+              answers: briefingState.answers,
+              article: briefingState.articleDraft,
+              sources: briefingState.sources,
+            }),
+          });
+
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || `HTTP ${response.status}`);
+          }
+
+          status.textContent = text("mismatchTranslatedStatus", {
+            language: languageLabelFor(currentLanguage),
+          });
+          updateBriefingState({
+            snapshotLanguage: currentLanguage,
+            dismissedMismatchSignature: "",
+            answers: normalizeAnswerItems(payload.answers),
+            sources: Array.isArray(payload.sources) ? payload.sources : briefingState.sources,
+            highlights: [],
+            articleDraft: typeof payload.article === "string" ? payload.article : "",
+            articleStatus:
+              typeof payload.article === "string" && payload.article
+                ? status.textContent
+                : defaultArticleStatus(briefingState.selectionMode),
+          });
+          renderAnswers(briefingState.answers);
+          renderSources(briefingState.sources);
+          renderHighlights();
+          renderArticleDraft();
+          renderHighlightNote();
+          renderMismatchBanner();
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          translateSnapshotButton.disabled = false;
+          rebuildSnapshotButton.disabled = false;
+          keepSnapshotButton.disabled = false;
+        }
+      }
+
+      function keepCurrentSnapshot() {
+        if (!hasEditionMismatch()) {
+          return;
+        }
+
+        updateBriefingState({
+          dismissedMismatchSignature: currentMismatchSignature(),
+        });
+        renderMismatchBanner();
+      }
+
+      function rebuildCurrentSnapshot() {
+        queryInput.value = briefingState.query;
+        form.requestSubmit();
+      }
+
       queryInput.addEventListener("input", () => {
         updateBriefingState({ query: queryInput.value });
       });
 
+      keepSnapshotButton.addEventListener("click", keepCurrentSnapshot);
+      translateSnapshotButton.addEventListener("click", translateSnapshot);
+      rebuildSnapshotButton.addEventListener("click", rebuildCurrentSnapshot);
       document.addEventListener("pointerup", () => {
         window.setTimeout(applySelectionHighlight, 0);
       });

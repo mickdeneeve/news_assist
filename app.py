@@ -85,7 +85,9 @@ BACKEND_TEXT = {
         "api_key_missing": "OPENAI_API_KEY is not set on the server.",
         "no_text_output": "OpenAI returned no text output.",
         "invalid_briefing_payload": "OpenAI returned an invalid briefing payload: {error}",
+        "invalid_translation_payload": "OpenAI returned an invalid translation payload: {error}",
         "no_excerpts": "No usable briefing text was provided for article drafting.",
+        "no_snapshot_answers": "No briefing answers are available to translate.",
         "no_article_text": "OpenAI returned no article text.",
         "model_empty": "OPENAI_MODEL cannot be empty.",
         "add_question": "Add at least one reporting question.",
@@ -110,7 +112,9 @@ BACKEND_TEXT = {
         "api_key_missing": "OPENAI_API_KEY is niet ingesteld op de server.",
         "no_text_output": "OpenAI gaf geen tekstuitvoer terug.",
         "invalid_briefing_payload": "OpenAI gaf een ongeldige briefingpayload terug: {error}",
+        "invalid_translation_payload": "OpenAI gaf een ongeldige vertaalpayload terug: {error}",
         "no_excerpts": "Er is geen bruikbare briefingtekst opgegeven voor het opstellen van het artikel.",
+        "no_snapshot_answers": "Er zijn geen briefingantwoorden beschikbaar om te vertalen.",
         "no_article_text": "OpenAI gaf geen artikeltekst terug.",
         "model_empty": "OPENAI_MODEL mag niet leeg zijn.",
         "add_question": "Voeg minstens een verslaggeversvraag toe.",
@@ -745,6 +749,131 @@ def normalize_article_excerpts(raw_excerpts: object) -> list[dict[str, str]]:
     return normalized
 
 
+def normalize_snapshot_answers(raw_answers: object) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    if not isinstance(raw_answers, list):
+        return normalized
+
+    for item in raw_answers:
+        if not isinstance(item, dict):
+            continue
+
+        question = str(item.get("question", "")).strip()
+        answer = str(item.get("answer", "")).strip()
+        if not question or not answer:
+            continue
+
+        normalized.append(
+            {
+                "question": question,
+                "answer": answer,
+                "links": normalize_answer_links(item.get("links")),
+            }
+        )
+
+    return normalized
+
+
+def normalize_snapshot_sources(raw_sources: object, edition: str) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    if not isinstance(raw_sources, list):
+        return normalized
+
+    target_language = preferred_wikipedia_language(edition)
+    seen_urls: set[str] = set()
+    for item in raw_sources:
+        if not isinstance(item, dict):
+            continue
+
+        raw_url = str(item.get("url", "")).strip()
+        title = str(item.get("title", "")).strip()
+        if not raw_url:
+            continue
+
+        url = resolve_wikipedia_language_variant(raw_url, target_language)
+        if not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        normalized.append({"title": title or url, "url": url})
+
+    return normalized
+
+
+def build_snapshot_translation_prompt(
+    answers: list[dict[str, object]], article: str, target_language: str
+) -> str:
+    snapshot_payload = json.dumps(
+        {
+            "answers": [
+                {
+                    "question": str(item["question"]),
+                    "answer": str(item["answer"]),
+                }
+                for item in answers
+            ],
+            "article": article,
+        },
+        ensure_ascii=False,
+    )
+
+    if normalize_language(target_language) == "nl":
+        return (
+            "Je bent een vertaalassistent voor journalistieke teksten. Vertaal de volledige snapshot getrouw "
+            "naar het Nederlands. Behoud betekenis, nuance, onzekerheid, structuur en alinea-indeling. Voeg "
+            "geen feiten toe, laat niets weg en vat niet samen. Geef uitsluitend geldige JSON terug met exact "
+            'deze vorm: {"answers":[{"question":"...","answer":"..."}],"article":"..."}. Houd hetzelfde aantal '
+            "answers in dezelfde volgorde. Als article leeg is, geef een lege string terug."
+            "\n\n"
+            f"Snapshot:\n{snapshot_payload}\n"
+        )
+
+    return (
+        "You are a translation assistant for journalism workflows. Translate the full snapshot faithfully into "
+        "English. Preserve meaning, nuance, uncertainty, structure, and paragraph breaks. Do not add facts, do "
+        "not omit facts, and do not summarize. Return valid JSON only with this exact shape: "
+        '{"answers":[{"question":"...","answer":"..."}],"article":"..."}. Keep the same number of answers in the '
+        "same order. If article is empty, return an empty string."
+        "\n\n"
+        f"Snapshot:\n{snapshot_payload}\n"
+    )
+
+
+def parse_snapshot_translation_output(
+    text: str, expected_answers: int, language: str
+) -> dict[str, object]:
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = "\n".join(
+            line for line in candidate.splitlines() if not line.strip().startswith("```")
+        ).strip()
+
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = candidate[start : end + 1]
+
+    payload = json.loads(candidate)
+    answers = payload.get("answers")
+    if not isinstance(answers, list) or len(answers) != expected_answers:
+        raise ValueError(backend_text(language, "unexpected_answers_payload"))
+
+    normalized_answers: list[dict[str, str]] = []
+    for item in answers:
+        if not isinstance(item, dict):
+            raise ValueError(backend_text(language, "malformed_answer_entry"))
+
+        question = str(item.get("question", "")).strip()
+        answer = str(item.get("answer", "")).strip()
+        if not question or not answer:
+            raise ValueError(backend_text(language, "empty_answer"))
+
+        normalized_answers.append({"question": question, "answer": answer})
+
+    article = str(payload.get("article", "")).strip()
+    return {"answers": normalized_answers, "article": article}
+
+
 def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], edition: str) -> str:
     instruction = article_query.strip() or localized_article_query(edition)
     excerpt_block = "\n\n".join(
@@ -950,6 +1079,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._handle_article_request()
             return
 
+        if route == "/api/translate-snapshot":
+            self._handle_snapshot_translation_request()
+            return
+
         if route == "/api/config":
             self._handle_config_update()
             return
@@ -1103,6 +1236,93 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "article_query": article_query,
                 "article_word_count": reporting_config["article_word_count"],
                 "article_selection_mode": article_selection_mode,
+            },
+        )
+
+    def _handle_snapshot_translation_request(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        edition = reporting_config["edition"]
+        language = reporting_config["language"]
+        answers = normalize_snapshot_answers(payload.get("answers"))
+        article = str(payload.get("article", "")).strip()
+        sources = normalize_snapshot_sources(payload.get("sources"), edition)
+
+        if not answers:
+            self._send_json(400, {"error": backend_text(language, "no_snapshot_answers")})
+            return
+
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            self._send_json(500, {"error": backend_text(language, "api_key_missing")})
+            return
+
+        model = current_model()
+        request_body = json.dumps(
+            {
+                "model": model,
+                "input": build_snapshot_translation_prompt(answers, article, language),
+            }
+        ).encode("utf-8")
+        request = Request(
+            OPENAI_RESPONSES_API_URL,
+            data=request_body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        try:
+            with urlopen(request, timeout=60) as response:
+                upstream_payload = json.loads(response.read())
+        except HTTPError as error:
+            message = extract_openai_error_message(error.read(), language)
+            self._send_json(error.code, {"error": message})
+            return
+        except URLError as error:
+            self._send_json(
+                502, {"error": backend_text(language, "could_not_reach_openai", reason=error.reason)}
+            )
+            return
+
+        raw_output = extract_output_text(upstream_payload)
+        if not raw_output:
+            self._send_json(502, {"error": backend_text(language, "no_text_output")})
+            return
+
+        try:
+            translated = parse_snapshot_translation_output(raw_output, len(answers), language)
+        except (ValueError, json.JSONDecodeError) as error:
+            self._send_json(
+                502, {"error": backend_text(language, "invalid_translation_payload", error=error)}
+            )
+            return
+
+        translated_answers: list[dict[str, object]] = []
+        for original, translated_item in zip(answers, translated["answers"]):
+            translated_answers.append(
+                {
+                    "question": translated_item["question"],
+                    "answer": translated_item["answer"],
+                    "links": normalize_links_for_edition(list(original["links"]), edition),
+                }
+            )
+
+        self._send_json(
+            200,
+            {
+                "model": model,
+                "answers": translated_answers,
+                "article": translated["article"],
+                "sources": sources,
+                "snapshot_edition": str(payload.get("snapshot_edition", "")).strip(),
+                "target_edition": edition,
+                "language": language,
             },
         )
 
