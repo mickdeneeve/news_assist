@@ -362,9 +362,9 @@
       </section>
 
       <section class="panel" aria-live="polite">
-        <p id="selections-label" class="label">Excluded Excerpts</p>
+        <p id="selections-label" class="label">Included Excerpts</p>
         <ol id="highlights-list">
-          <li>No excluded passages yet. Select text in an answer to remove it from the article.</li>
+          <li>The included material for each configured question will appear here after a briefing is generated.</li>
         </ol>
         <div class="actions">
           <button type="button" id="clear-highlights" class="secondary">Clear Selections</button>
@@ -417,13 +417,17 @@
       }
 
       function selectionModeHeading(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
-        return normalizeSelectionMode(mode) === "include" ? "Included Excerpts" : "Excluded Excerpts";
+        return "Included Excerpts";
+      }
+
+      function selectionModeChoiceLabel(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
+        return normalizeSelectionMode(mode) === "include" ? "Include in yellow" : "Exclude in red";
       }
 
       function selectionModeEmptyMessage(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
         return normalizeSelectionMode(mode) === "include"
           ? "No included passages yet. Select text in an answer to use it in the article."
-          : "No excluded passages yet. Select text in an answer to remove it from the article.";
+          : "No included material remains. Clear some red selections or exclude less text.";
       }
 
       function selectionModeNote(mode = DEFAULT_ARTICLE_SELECTION_MODE) {
@@ -839,46 +843,35 @@
         selectionsLabel.textContent = selectionModeHeading(briefingState.selectionMode);
         highlightsList.replaceChildren();
 
-        if (!briefingState.highlights.length) {
+        if (!briefingState.hasBriefing) {
+          const item = document.createElement("li");
+          item.textContent =
+            "The included material for each configured question will appear here after a briefing is generated.";
+          highlightsList.appendChild(item);
+          return;
+        }
+
+        const excerpts = buildArticleExcerpts();
+
+        if (!excerpts.length) {
           const item = document.createElement("li");
           item.textContent = selectionModeEmptyMessage(briefingState.selectionMode);
           highlightsList.appendChild(item);
           return;
         }
 
-        briefingState.highlights.forEach((highlight, index) => {
+        excerpts.forEach((excerpt) => {
           const item = document.createElement("li");
           item.className = `highlight-item highlight-item-${briefingState.selectionMode}`;
 
-          const controls = document.createElement("div");
-          controls.className = "highlight-controls";
-
-          const textBlock = document.createElement("div");
-
           const meta = document.createElement("span");
           meta.className = "highlight-meta";
-          meta.textContent = highlight.question;
+          meta.textContent = excerpt.question;
 
           const body = document.createElement("p");
-          body.textContent = highlight.text;
+          body.textContent = excerpt.text;
 
-          textBlock.append(meta, body);
-
-          const removeButton = document.createElement("button");
-          removeButton.type = "button";
-          removeButton.className = "secondary";
-          removeButton.textContent = "Remove";
-          removeButton.addEventListener("click", () => {
-            const nextHighlights = briefingState.highlights.filter((_, itemIndex) => itemIndex !== index);
-            updateBriefingState({ highlights: nextHighlights });
-            renderAnswers(briefingState.answers);
-            renderHighlights();
-            resetArticleDraftState(defaultArticleStatus(briefingState.selectionMode));
-            renderHighlightNote();
-          });
-
-          controls.append(textBlock, removeButton);
-          item.appendChild(controls);
+          item.append(meta, body);
           highlightsList.appendChild(item);
         });
       }
@@ -1013,11 +1006,27 @@
       }
 
       function buildArticleExcerpts() {
+        const excerptByQuestion = new Map();
+
         if (briefingState.selectionMode === "include") {
-          return briefingState.highlights.map((highlight) => ({
-            question: highlight.question,
-            text: highlight.text,
-          }));
+          briefingState.answers.forEach((answerItem) => {
+            const includedText = briefingState.highlights
+              .filter((highlight) => highlight.question === answerItem.question)
+              .map((highlight) => highlight.text.trim())
+              .filter(Boolean)
+              .join("\n\n");
+
+            if (includedText) {
+              excerptByQuestion.set(answerItem.question, includedText);
+            }
+          });
+
+          return briefingState.answers
+            .filter((answerItem) => excerptByQuestion.has(answerItem.question))
+            .map((answerItem) => ({
+              question: answerItem.question,
+              text: excerptByQuestion.get(answerItem.question),
+            }));
         }
 
         const excerpts = [];
@@ -1038,17 +1047,25 @@
           }
 
           let cursor = 0;
+          const includedChunks = [];
           for (const exclusion of exclusions) {
             const chunk = answerText.slice(cursor, exclusion.start).trim();
             if (chunk) {
-              excerpts.push({ question: answerItem.question, text: chunk });
+              includedChunks.push(chunk);
             }
             cursor = exclusion.end;
           }
 
           const tail = answerText.slice(cursor).trim();
           if (tail) {
-            excerpts.push({ question: answerItem.question, text: tail });
+            includedChunks.push(tail);
+          }
+
+          if (includedChunks.length) {
+            excerpts.push({
+              question: answerItem.question,
+              text: includedChunks.join("\n\n"),
+            });
           }
         });
 
@@ -1101,7 +1118,7 @@
 
           if (selectionModeChanged) {
             renderHighlightNote(
-              `${selectionModeHeading(nextSelectionMode)} mode loaded. Previous selections were cleared.`,
+              `${selectionModeChoiceLabel(nextSelectionMode)} mode loaded. Previous selections were cleared.`,
               true
             );
           }
@@ -1216,10 +1233,7 @@
         }
 
         articleButton.disabled = true;
-        articleStatus.textContent =
-          briefingState.selectionMode === "include"
-            ? `Drafting article from ${excerpts.length} included excerpt(s)...`
-            : `Drafting article from ${excerpts.length} remaining excerpt(s)...`;
+        articleStatus.textContent = `Drafting article from ${excerpts.length} included excerpt(s)...`;
 
         try {
           const response = await fetch("/api/article", {
