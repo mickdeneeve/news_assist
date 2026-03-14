@@ -336,7 +336,6 @@
         <p id="mismatch-label" class="label">Edition mismatch</p>
         <p id="mismatch-body" class="mismatch-body"></p>
         <div class="actions">
-          <button type="button" id="keep-snapshot" class="secondary">Keep current snapshot</button>
           <button type="button" id="translate-snapshot" class="secondary">Translate snapshot</button>
           <button type="button" id="rebuild-snapshot">Rebuild briefing</button>
         </div>
@@ -463,12 +462,13 @@
             `Current edition is ${currentEdition}. The visible snapshot was generated for ${snapshotEdition} and is currently rendered in ${renderedLanguage}. Translate it for on-screen reading, or rebuild if you want sourcing aligned with the current edition.`,
           mismatchBodyTranslated: ({ currentEdition, snapshotEdition, renderedLanguage }) =>
             `Current edition is ${currentEdition}. The visible snapshot was generated for ${snapshotEdition} and translated into ${renderedLanguage}. Rebuild if you want sourcing aligned with the current edition.`,
-          mismatchKeepButton: "Keep Current Snapshot",
           mismatchTranslateButton: ({ language }) => `Translate Snapshot to ${language}`,
           mismatchRebuildButton: ({ edition }) => `Rebuild in ${edition}`,
           mismatchTranslating: ({ language }) => `Translating snapshot to ${language}...`,
           mismatchTranslatedStatus: ({ language }) =>
             `Snapshot translated to ${language}. Rebuild if you want sources aligned with the current edition.`,
+          mismatchRebuilding: ({ language, edition }) =>
+            `Translating the topic into ${language} and rebuilding in ${edition}...`,
           selectionEmptyInclude:
             "No included passages yet. Select text in an answer to use it in the article.",
           selectionEmptyExclude:
@@ -555,12 +555,13 @@
             `De huidige editie is ${currentEdition}. De zichtbare snapshot is gegenereerd voor ${snapshotEdition} en wordt nu weergegeven in het ${renderedLanguage}. Vertaal die voor weergave, of bouw opnieuw op als je bronnen wilt die bij de huidige editie passen.`,
           mismatchBodyTranslated: ({ currentEdition, snapshotEdition, renderedLanguage }) =>
             `De huidige editie is ${currentEdition}. De zichtbare snapshot is gegenereerd voor ${snapshotEdition} en vertaald naar het ${renderedLanguage}. Bouw opnieuw op als je bronnen wilt die bij de huidige editie passen.`,
-          mismatchKeepButton: "Huidige snapshot behouden",
           mismatchTranslateButton: ({ language }) => `Snapshot vertalen naar ${language}`,
           mismatchRebuildButton: ({ edition }) => `Opnieuw opbouwen in ${edition}`,
           mismatchTranslating: ({ language }) => `Snapshot wordt vertaald naar het ${language}...`,
           mismatchTranslatedStatus: ({ language }) =>
             `Snapshot vertaald naar het ${language}. Bouw opnieuw op als je bronnen wilt die bij de huidige editie passen.`,
+          mismatchRebuilding: ({ language, edition }) =>
+            `Onderwerp wordt vertaald naar het ${language} en opnieuw opgebouwd in ${edition}...`,
           selectionEmptyInclude:
             "Nog geen opgenomen passages. Selecteer tekst in een antwoord om die in het artikel te gebruiken.",
           selectionEmptyExclude:
@@ -618,7 +619,6 @@
       const mismatchBanner = document.getElementById("mismatch-banner");
       const mismatchLabel = document.getElementById("mismatch-label");
       const mismatchBody = document.getElementById("mismatch-body");
-      const keepSnapshotButton = document.getElementById("keep-snapshot");
       const translateSnapshotButton = document.getElementById("translate-snapshot");
       const rebuildSnapshotButton = document.getElementById("rebuild-snapshot");
       const questionPreviewLabel = document.getElementById("question-preview-label");
@@ -860,7 +860,6 @@
         return {
           edition: currentEdition,
           snapshotLanguage: currentLanguage,
-          dismissedMismatchSignature: "",
           query: "",
           status: text("ready"),
           answers: normalizeAnswerItems([waitingAnswerItem()]),
@@ -887,10 +886,6 @@
             snapshotLanguage: normalizeLanguage(
               parsed.snapshotLanguage || parsed.language || editionLanguage(edition)
             ),
-            dismissedMismatchSignature:
-              typeof parsed.dismissedMismatchSignature === "string"
-                ? parsed.dismissedMismatchSignature
-                : "",
             query: typeof parsed.query === "string" ? parsed.query : "",
             status: typeof parsed.status === "string" ? parsed.status : text("ready"),
             answers: normalizeAnswerItems(parsed.answers),
@@ -1051,12 +1046,6 @@
       };
       persistBriefingState();
 
-      function currentMismatchSignature() {
-        return `${normalizeEdition(briefingState.edition)}|${normalizeLanguage(
-          briefingState.snapshotLanguage
-        )}|${currentEdition}`;
-      }
-
       function hasEditionMismatch() {
         return briefingState.hasBriefing && normalizeEdition(briefingState.edition) !== currentEdition;
       }
@@ -1068,12 +1057,6 @@
         }
 
         if (!hasEditionMismatch()) {
-          mismatchBanner.hidden = true;
-          return;
-        }
-
-        const signature = currentMismatchSignature();
-        if (briefingState.dismissedMismatchSignature === signature) {
           mismatchBanner.hidden = true;
           return;
         }
@@ -1096,7 +1079,6 @@
               snapshotEdition,
               renderedLanguage,
             });
-        keepSnapshotButton.textContent = text("mismatchKeepButton");
         translateSnapshotButton.textContent = text("mismatchTranslateButton", {
           language: languageLabelFor(currentLanguage),
         });
@@ -1599,10 +1581,8 @@
         }
       }
 
-      async function submitBriefing(event) {
-        event.preventDefault();
-
-        const query = queryInput.value.trim();
+      async function requestBriefing(queryText) {
+        const query = String(queryText || "").trim();
         if (!query) {
           status.textContent = text("enterTopicFirst");
           updateBriefingState({ query: queryInput.value, status: status.textContent });
@@ -1642,8 +1622,7 @@
           updateBriefingState({
             edition: currentEdition,
             snapshotLanguage: currentLanguage,
-            dismissedMismatchSignature: "",
-            query: queryInput.value,
+            query,
             status: status.textContent,
             answers: normalizedAnswers,
             sources: payload.sources || [],
@@ -1656,14 +1635,14 @@
           renderSources(briefingState.sources);
           renderHighlights();
           renderArticleDraft();
+          renderMismatchBanner();
         } catch (error) {
           const failedAnswers = normalizeAnswerItems([requestFailedAnswerItem(error.message)]);
           status.textContent = error.message;
           updateBriefingState({
             edition: currentEdition,
             snapshotLanguage: currentLanguage,
-            dismissedMismatchSignature: "",
-            query: queryInput.value,
+            query,
             status: status.textContent,
             answers: failedAnswers,
             sources: [],
@@ -1676,9 +1655,15 @@
           renderSources(briefingState.sources);
           renderHighlights();
           renderArticleDraft();
+          renderMismatchBanner();
         } finally {
           sendButton.disabled = false;
         }
+      }
+
+      async function submitBriefing(event) {
+        event.preventDefault();
+        await requestBriefing(queryInput.value);
       }
 
       async function submitArticle(event) {
@@ -1761,9 +1746,7 @@
           return;
         }
 
-        translateSnapshotButton.disabled = true;
-        rebuildSnapshotButton.disabled = true;
-        keepSnapshotButton.disabled = true;
+        setMismatchActionButtonsDisabled(true);
         status.textContent = text("mismatchTranslating", {
           language: languageLabelFor(currentLanguage),
         });
@@ -1792,7 +1775,6 @@
           });
           updateBriefingState({
             snapshotLanguage: currentLanguage,
-            dismissedMismatchSignature: "",
             answers: normalizeAnswerItems(payload.answers),
             sources: Array.isArray(payload.sources) ? payload.sources : briefingState.sources,
             highlights: [],
@@ -1811,33 +1793,60 @@
         } catch (error) {
           status.textContent = error.message;
         } finally {
-          translateSnapshotButton.disabled = false;
-          rebuildSnapshotButton.disabled = false;
-          keepSnapshotButton.disabled = false;
+          setMismatchActionButtonsDisabled(false);
         }
       }
 
-      function keepCurrentSnapshot() {
-        if (!hasEditionMismatch()) {
-          return;
-        }
+      function setMismatchActionButtonsDisabled(disabled) {
+        translateSnapshotButton.disabled = disabled;
+        rebuildSnapshotButton.disabled = disabled;
+      }
 
-        updateBriefingState({
-          dismissedMismatchSignature: currentMismatchSignature(),
+      async function translateTopicForCurrentEdition(topicText) {
+        const response = await fetch("/api/translate-topic", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            topic: topicText,
+          }),
         });
-        renderMismatchBanner();
+
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+
+        return typeof payload.topic === "string" && payload.topic.trim()
+          ? payload.topic.trim()
+          : String(topicText || "").trim();
       }
 
-      function rebuildCurrentSnapshot() {
-        queryInput.value = briefingState.query;
-        form.requestSubmit();
+      async function rebuildCurrentSnapshot() {
+        const rawTopic = queryInput.value.trim();
+        setMismatchActionButtonsDisabled(true);
+
+        try {
+          status.textContent = text("mismatchRebuilding", {
+            language: languageLabelFor(currentLanguage),
+            edition: editionLabelFor(currentEdition),
+          });
+          const translatedTopic = await translateTopicForCurrentEdition(rawTopic);
+          queryInput.value = translatedTopic;
+          updateBriefingState({ query: translatedTopic });
+          await requestBriefing(translatedTopic);
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          setMismatchActionButtonsDisabled(false);
+        }
       }
 
       queryInput.addEventListener("input", () => {
         updateBriefingState({ query: queryInput.value });
       });
 
-      keepSnapshotButton.addEventListener("click", keepCurrentSnapshot);
       translateSnapshotButton.addEventListener("click", translateSnapshot);
       rebuildSnapshotButton.addEventListener("click", rebuildCurrentSnapshot);
       document.addEventListener("pointerup", () => {

@@ -839,6 +839,29 @@ def build_snapshot_translation_prompt(
     )
 
 
+def build_topic_translation_prompt(topic: str, target_language: str) -> str:
+    normalized_language = normalize_language(target_language)
+    if normalized_language == "nl":
+        return (
+            "Je bent een vertaalassistent voor journalistieke workflows. Vertaal uitsluitend de opgegeven "
+            "onderwerp- of gebeurtenisregel naar natuurlijk Nederlands. Behoud eigennamen, data, onzekerheid en "
+            "bedoeling. Beantwoord de vraag niet, voeg geen context toe en parafraseer niet verder dan nodig is "
+            "voor een natuurlijke Nederlandse formulering. Geef uitsluitend geldige JSON terug met exact deze "
+            'vorm: {"text":"..."}.'
+            "\n\n"
+            f"Onderwerp of gebeurtenis:\n{topic}\n"
+        )
+
+    return (
+        "You are a translation assistant for journalism workflows. Translate only the provided topic or event line "
+        "into natural English. Preserve names, dates, uncertainty, and intent. Do not answer the query, do not add "
+        "context, and do not paraphrase beyond what is needed for natural English wording. Return valid JSON only "
+        'with this exact shape: {"text":"..."}.'
+        "\n\n"
+        f"Topic or event:\n{topic}\n"
+    )
+
+
 def parse_snapshot_translation_output(
     text: str, expected_answers: int, language: str
 ) -> dict[str, object]:
@@ -872,6 +895,26 @@ def parse_snapshot_translation_output(
 
     article = str(payload.get("article", "")).strip()
     return {"answers": normalized_answers, "article": article}
+
+
+def parse_topic_translation_output(text: str, language: str) -> str:
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        candidate = "\n".join(
+            line for line in candidate.splitlines() if not line.strip().startswith("```")
+        ).strip()
+
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = candidate[start : end + 1]
+
+    payload = json.loads(candidate)
+    translated = str(payload.get("text", "")).strip()
+    if not translated:
+        raise ValueError(backend_text(language, "provide_topic"))
+
+    return translated
 
 
 def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], edition: str) -> str:
@@ -1077,6 +1120,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         if route == "/api/article":
             self._handle_article_request()
+            return
+
+        if route == "/api/translate-topic":
+            self._handle_topic_translation_request()
             return
 
         if route == "/api/translate-snapshot":
@@ -1322,6 +1369,75 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "sources": sources,
                 "snapshot_edition": str(payload.get("snapshot_edition", "")).strip(),
                 "target_edition": edition,
+                "language": language,
+            },
+        )
+
+    def _handle_topic_translation_request(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        language = reporting_config["language"]
+        topic = str(payload.get("topic", "")).strip()
+        if not topic:
+            self._send_json(400, {"error": backend_text(language, "provide_topic")})
+            return
+
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            self._send_json(500, {"error": backend_text(language, "api_key_missing")})
+            return
+
+        model = current_model()
+        request_body = json.dumps(
+            {
+                "model": model,
+                "input": build_topic_translation_prompt(topic, language),
+            }
+        ).encode("utf-8")
+        request = Request(
+            OPENAI_RESPONSES_API_URL,
+            data=request_body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+        try:
+            with urlopen(request, timeout=60) as response:
+                upstream_payload = json.loads(response.read())
+        except HTTPError as error:
+            message = extract_openai_error_message(error.read(), language)
+            self._send_json(error.code, {"error": message})
+            return
+        except URLError as error:
+            self._send_json(
+                502, {"error": backend_text(language, "could_not_reach_openai", reason=error.reason)}
+            )
+            return
+
+        raw_output = extract_output_text(upstream_payload)
+        if not raw_output:
+            self._send_json(502, {"error": backend_text(language, "no_text_output")})
+            return
+
+        try:
+            translated_topic = parse_topic_translation_output(raw_output, language)
+        except (ValueError, json.JSONDecodeError) as error:
+            self._send_json(
+                502, {"error": backend_text(language, "invalid_translation_payload", error=error)}
+            )
+            return
+
+        self._send_json(
+            200,
+            {
+                "model": model,
+                "topic": translated_topic,
                 "language": language,
             },
         )
