@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -74,6 +75,23 @@ ARTICLE_SELECTION_MODES = {"include", "exclude"}
 ARTICLE_WORD_PLACEHOLDER = "N"
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 WIKIPEDIA_LINK_CACHE: dict[tuple[str, str], str] = {}
+SOURCE_TITLE_CACHE: dict[str, str] = {}
+HTML_COMMENT_PATTERN = re.compile(r"<!--[\s\S]*?-->")
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+HTML_ATTR_PATTERN = re.compile(
+    r"([a-zA-Z_:][\w:.-]*)\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)"
+)
+HTML_WHITESPACE_PATTERN = re.compile(r"\s+")
+JSON_LD_SCRIPT_PATTERN = re.compile(
+    r"<script\b[^>]*type\s*=\s*(?:\"application/ld\+json\"|'application/ld\+json'|application/ld\+json)[^>]*>"
+    r"([\s\S]*?)</script>",
+    re.IGNORECASE,
+)
+META_TAG_PATTERN = re.compile(r"<meta\b[^>]+>", re.IGNORECASE)
+TITLE_TAG_PATTERN = re.compile(r"<title\b[^>]*>([\s\S]*?)</title>", re.IGNORECASE)
+H1_TAG_PATTERN = re.compile(r"<h1\b[^>]*>([\s\S]*?)</h1>", re.IGNORECASE)
+HEXISH_TITLE_PATTERN = re.compile(r"^[a-f0-9]{12,}$", re.IGNORECASE)
+TITLE_SEPARATORS = (" | ", " - ", " — ", " – ", " :: ", " / ")
 BACKEND_TEXT = {
     "en": {
         "openai_error_default": "OpenAI request failed.",
@@ -533,6 +551,87 @@ def unique_urls(urls: list[str]) -> list[str]:
     return deduped
 
 
+def normalize_source_title_text(value: object) -> str:
+    text = html.unescape(str(value or ""))
+    text = HTML_COMMENT_PATTERN.sub(" ", text)
+    text = HTML_TAG_PATTERN.sub(" ", text)
+    return HTML_WHITESPACE_PATTERN.sub(" ", text).strip()
+
+
+def parse_html_attributes(tag: str) -> dict[str, str]:
+    attributes: dict[str, str] = {}
+    for name, value in HTML_ATTR_PATTERN.findall(tag):
+        cleaned = value.strip().strip("\"'")
+        attributes[name.lower()] = html.unescape(cleaned)
+    return attributes
+
+
+def normalize_source_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def hostname_variants(url: str) -> tuple[str, str]:
+    try:
+        hostname = urlparse(url).netloc.lower()
+    except ValueError:
+        return "", ""
+
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+
+    return hostname, hostname.split(".", 1)[0] if hostname else ""
+
+
+def looks_like_site_name(value: str, url: str) -> bool:
+    normalized_value = normalize_source_key(value)
+    if not normalized_value:
+        return False
+
+    hostname, root = hostname_variants(url)
+    normalized_hostname = normalize_source_key(hostname)
+    normalized_root = normalize_source_key(root)
+    candidates = {
+        normalized_hostname,
+        normalized_root,
+        f"{normalized_root}news" if normalized_root else "",
+        f"{normalized_root}nieuws" if normalized_root else "",
+    }
+    return normalized_value in {candidate for candidate in candidates if candidate}
+
+
+def source_title_looks_bad(title: str, url: str) -> bool:
+    normalized_title = normalize_source_title_text(title)
+    if not normalized_title:
+        return True
+
+    if normalized_title == url:
+        return True
+
+    collapsed = normalize_source_key(normalized_title)
+    if HEXISH_TITLE_PATTERN.fullmatch(collapsed):
+        return True
+
+    return looks_like_site_name(normalized_title, url)
+
+
+def strip_site_suffix(title: str, url: str) -> str:
+    cleaned = normalize_source_title_text(title)
+    if not cleaned:
+        return ""
+
+    for separator in TITLE_SEPARATORS:
+        parts = [part.strip() for part in cleaned.split(separator)]
+        if len(parts) < 2:
+            continue
+
+        trailing = parts[-1]
+        leading = separator.join(parts[:-1]).strip()
+        if leading and looks_like_site_name(trailing, url):
+            return leading
+
+    return cleaned
+
+
 def wikipedia_article_title(url: str) -> tuple[str, str] | None:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -551,6 +650,156 @@ def wikipedia_article_title(url: str) -> tuple[str, str] | None:
         return None
 
     return host, title.replace("_", " ")
+
+
+def extract_json_ld_article_titles(document: str) -> list[str]:
+    candidates: list[str] = []
+
+    def collect_titles(node: object) -> None:
+        if isinstance(node, dict):
+            headline = node.get("headline")
+            if isinstance(headline, str):
+                candidates.append(headline)
+
+            alternative_headline = node.get("alternativeHeadline")
+            if isinstance(alternative_headline, str):
+                candidates.append(alternative_headline)
+
+            for value in node.values():
+                collect_titles(value)
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                collect_titles(item)
+
+    for match in JSON_LD_SCRIPT_PATTERN.finditer(document):
+        payload = html.unescape(match.group(1).strip())
+        if not payload:
+            continue
+
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+
+        collect_titles(parsed)
+
+    return [normalize_source_title_text(candidate) for candidate in candidates if candidate]
+
+
+def extract_meta_title(document: str, names: set[str]) -> str:
+    target_names = {name.lower() for name in names}
+    for match in META_TAG_PATTERN.finditer(document):
+        attributes = parse_html_attributes(match.group(0))
+        attribute_name = (attributes.get("property") or attributes.get("name") or "").lower()
+        if attribute_name not in target_names:
+            continue
+
+        content = normalize_source_title_text(attributes.get("content", ""))
+        if content:
+            return content
+
+    return ""
+
+
+def extract_tag_text(document: str, pattern: re.Pattern[str]) -> str:
+    match = pattern.search(document)
+    if not match:
+        return ""
+    return normalize_source_title_text(match.group(1))
+
+
+def decode_html_document(raw_bytes: bytes, charset: str | None) -> str:
+    encodings: list[str] = []
+    if charset:
+        encodings.append(charset)
+    encodings.extend(["utf-8", "utf-8-sig", "latin-1"])
+
+    seen: set[str] = set()
+    for encoding in encodings:
+        normalized_encoding = str(encoding or "").strip().lower()
+        if not normalized_encoding or normalized_encoding in seen:
+            continue
+        seen.add(normalized_encoding)
+
+        try:
+            return raw_bytes.decode(normalized_encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+    return raw_bytes.decode("utf-8", errors="replace")
+
+
+def fetch_source_page_title(url: str) -> str:
+    if url in SOURCE_TITLE_CACHE:
+        return SOURCE_TITLE_CACHE[url]
+
+    article = wikipedia_article_title(url)
+    if article is not None:
+        SOURCE_TITLE_CACHE[url] = article[1]
+        return article[1]
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        SOURCE_TITLE_CACHE[url] = ""
+        return ""
+
+    request = Request(
+        url,
+        method="GET",
+        headers={
+            "User-Agent": APP_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+        },
+    )
+
+    try:
+        with urlopen(request, timeout=10) as response:
+            content_type = str(response.headers.get("Content-Type", "")).lower()
+            if "html" not in content_type:
+                SOURCE_TITLE_CACHE[url] = ""
+                return ""
+            document = decode_html_document(
+                response.read(750_000),
+                response.headers.get_content_charset(),
+            )
+    except (HTTPError, URLError, TimeoutError, OSError):
+        SOURCE_TITLE_CACHE[url] = ""
+        return ""
+
+    candidate_titles = [
+        extract_tag_text(document, H1_TAG_PATTERN),
+        extract_meta_title(document, {"og:title"}),
+        extract_meta_title(document, {"twitter:title"}),
+        *extract_json_ld_article_titles(document),
+        extract_tag_text(document, TITLE_TAG_PATTERN),
+    ]
+
+    for candidate in candidate_titles:
+        cleaned = strip_site_suffix(candidate, url)
+        if cleaned and not source_title_looks_bad(cleaned, url):
+            SOURCE_TITLE_CACHE[url] = cleaned
+            return cleaned
+
+    SOURCE_TITLE_CACHE[url] = ""
+    return ""
+
+
+def resolve_source_title(url: str, raw_title: object) -> str:
+    article = wikipedia_article_title(url)
+    if article is not None:
+        return article[1]
+
+    supplied_title = strip_site_suffix(str(raw_title or ""), url)
+    if supplied_title and not source_title_looks_bad(supplied_title, url):
+        return supplied_title
+
+    fetched_title = fetch_source_page_title(url)
+    if fetched_title and not source_title_looks_bad(fetched_title, url):
+        return fetched_title
+
+    return ""
 
 
 def resolve_wikipedia_language_variant(url: str, target_language: str | None) -> str:
@@ -786,7 +1035,6 @@ def normalize_snapshot_sources(raw_sources: object, edition: str) -> list[dict[s
             continue
 
         raw_url = str(item.get("url", "")).strip()
-        title = str(item.get("title", "")).strip()
         if not raw_url:
             continue
 
@@ -795,7 +1043,7 @@ def normalize_snapshot_sources(raw_sources: object, edition: str) -> list[dict[s
             continue
 
         seen_urls.add(url)
-        normalized.append({"title": title, "url": url})
+        normalized.append({"title": resolve_source_title(url, item.get("title")), "url": url})
 
     return normalized
 
@@ -970,12 +1218,11 @@ def extract_web_search_sources(payload: dict[str, object], edition: str) -> list
                 str(source.get("url", "")).strip(),
                 preferred_wikipedia_language(edition),
             )
-            title = str(source.get("title", "")).strip()
             if not url or url in seen_urls:
                 continue
 
             seen_urls.add(url)
-            sources.append({"title": title, "url": url})
+            sources.append({"title": resolve_source_title(url, source.get("title")), "url": url})
 
     return sources
 
