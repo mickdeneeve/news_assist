@@ -814,6 +814,55 @@
         });
       }
 
+      function buildDisplaySources(sourceItems = briefingState.sources, answerItems = briefingState.answers) {
+        const orderedSources = [];
+        const seen = new Set();
+
+        const addSource = (source) => {
+          if (!source || typeof source !== "object") {
+            return;
+          }
+
+          const url = String(source.url || "").trim();
+          if (!url || seen.has(url)) {
+            return;
+          }
+
+          seen.add(url);
+          orderedSources.push({
+            title: String(source.title || "").trim(),
+            url,
+          });
+        };
+
+        if (Array.isArray(sourceItems)) {
+          sourceItems.forEach(addSource);
+        }
+
+        if (Array.isArray(answerItems)) {
+          answerItems.forEach((item) => {
+            if (!item || !Array.isArray(item.links)) {
+              return;
+            }
+
+            uniqueUrls(item.links.map((url) => String(url || "").trim())).forEach((url) =>
+              addSource({ title: "", url })
+            );
+          });
+        }
+
+        return orderedSources;
+      }
+
+      function buildSourceIndexMap(sourceItems = briefingState.sources, answerItems = briefingState.answers) {
+        const displaySources = buildDisplaySources(sourceItems, answerItems);
+        const sourceIndexMap = new Map();
+        displaySources.forEach((source, index) => {
+          sourceIndexMap.set(source.url, index + 1);
+        });
+        return sourceIndexMap;
+      }
+
       function splitTrailingLinks(answerText) {
         const lines = String(answerText || "").trim().split(/\r?\n/);
         const trailingUrls = [];
@@ -1165,6 +1214,7 @@
 
       function renderAnswers(items) {
         answers.replaceChildren();
+        const sourceIndexMap = buildSourceIndexMap(briefingState.sources, items);
 
         for (const item of items) {
           const card = document.createElement("article");
@@ -1191,8 +1241,12 @@
             const linkList = document.createElement("ol");
             linkList.className = "answer-links";
 
-            item.links.forEach((url) => {
+            uniqueUrls(item.links.map((url) => String(url || "").trim())).forEach((url) => {
               const linkItem = document.createElement("li");
+              const sourceIndex = sourceIndexMap.get(url);
+              if (sourceIndex) {
+                linkItem.value = sourceIndex;
+              }
               const link = document.createElement("a");
               link.href = url;
               link.target = "_blank";
@@ -1210,18 +1264,24 @@
         }
       }
 
-      function renderSources(items, emptyMessage = text("sourcesEmpty")) {
+      function renderSources(
+        items,
+        emptyMessage = text("sourcesEmpty"),
+        answerItems = briefingState.answers
+      ) {
         sources.replaceChildren();
+        const displaySources = buildDisplaySources(items, answerItems);
 
-        if (!items.length) {
+        if (!displaySources.length) {
           const item = document.createElement("li");
           item.textContent = emptyMessage;
           sources.appendChild(item);
           return;
         }
 
-        for (const source of items) {
+        displaySources.forEach((source, index) => {
           const item = document.createElement("li");
+          item.id = `source-${index + 1}`;
           const link = document.createElement("a");
           link.href = source.url;
           link.target = "_blank";
@@ -1229,7 +1289,7 @@
           link.textContent = source.url;
           item.append(link);
           sources.appendChild(item);
-        }
+        });
       }
 
       function renderHighlights() {
@@ -1626,7 +1686,7 @@
         sendButton.disabled = true;
         status.textContent = text("answeringQuestions", { count: questionCount });
         renderAnswers(normalizeAnswerItems([workingAnswerItem()]));
-        renderSources([], text("sourcesAfterBriefing"));
+        renderSources([], text("sourcesAfterBriefing"), []);
         renderHighlightNote();
         updateBriefingState({
           highlights: [],
