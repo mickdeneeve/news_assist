@@ -211,17 +211,51 @@
 
       .answer-links {
         margin: 0;
-        padding-left: 1.2rem;
+        padding-left: 0;
+        list-style: none;
       }
 
       .answer-links li + li {
         margin-top: 0.45rem;
       }
 
+      .answer-links li {
+        display: flex;
+        gap: 0.55rem;
+        align-items: flex-start;
+      }
+
+      .answer-source-jump {
+        flex: 0 0 auto;
+        color: var(--accent);
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .answer-source-jump:hover,
+      .answer-source-jump:focus-visible {
+        text-decoration: underline;
+      }
+
       .answer-links li,
       #sources li {
         overflow-wrap: anywhere;
         word-break: break-word;
+      }
+
+      #sources li {
+        scroll-margin-top: 1rem;
+      }
+
+      #sources li:target {
+        background: rgba(13, 107, 102, 0.08);
+        border-radius: 10px;
+      }
+
+      #sources li:focus-visible {
+        outline: 2px solid rgba(13, 107, 102, 0.35);
+        outline-offset: 2px;
+        border-radius: 10px;
       }
 
       .answer-links a,
@@ -1245,7 +1279,15 @@
               const linkItem = document.createElement("li");
               const sourceIndex = sourceIndexMap.get(url);
               if (sourceIndex) {
-                linkItem.value = sourceIndex;
+                const sourceJump = document.createElement("a");
+                sourceJump.href = `#source-${sourceIndex}`;
+                sourceJump.className = "answer-source-jump";
+                sourceJump.textContent = `[${sourceIndex}]`;
+                sourceJump.addEventListener("click", (event) => {
+                  event.preventDefault();
+                  focusSourceEntry(sourceIndex);
+                });
+                linkItem.appendChild(sourceJump);
               }
               const link = document.createElement("a");
               link.href = url;
@@ -1282,6 +1324,7 @@
         displaySources.forEach((source, index) => {
           const item = document.createElement("li");
           item.id = `source-${index + 1}`;
+          item.tabIndex = -1;
           const link = document.createElement("a");
           link.href = source.url;
           link.target = "_blank";
@@ -1290,6 +1333,27 @@
           item.append(link);
           sources.appendChild(item);
         });
+      }
+
+      function focusSourceEntry(sourceIndex) {
+        const target = document.getElementById(`source-${sourceIndex}`);
+        if (!target) {
+          return;
+        }
+
+        if (window.history && typeof window.history.replaceState === "function") {
+          window.history.replaceState(null, "", `#source-${sourceIndex}`);
+        } else {
+          window.location.hash = `source-${sourceIndex}`;
+        }
+
+        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+        try {
+          target.focus({ preventScroll: true });
+        } catch (error) {
+          target.focus();
+        }
       }
 
       function renderHighlights() {
