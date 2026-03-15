@@ -108,16 +108,24 @@
       }
 
       #question-preview,
-      #sources,
+      #referenced-sources,
+      #other-sources,
       #highlights-list {
         margin: 0;
         padding-left: 1.2rem;
       }
 
       #question-preview li + li,
-      #sources li + li,
+      #referenced-sources li + li,
+      #other-sources li + li,
       #highlights-list li + li {
         margin-top: 0.55rem;
+      }
+
+      .sources-group + .sources-group {
+        margin-top: 1rem;
+        padding-top: 0.95rem;
+        border-top: 1px solid rgba(24, 33, 38, 0.08);
       }
 
       form {
@@ -238,28 +246,30 @@
       }
 
       .answer-links li,
-      #sources li {
+      #referenced-sources li,
+      #other-sources li {
         overflow-wrap: anywhere;
         word-break: break-word;
       }
 
-      #sources li {
+      #referenced-sources li {
         scroll-margin-top: 1rem;
       }
 
-      #sources li:target {
+      #referenced-sources li:target {
         background: rgba(13, 107, 102, 0.08);
         border-radius: 10px;
       }
 
-      #sources li:focus-visible {
+      #referenced-sources li:focus-visible {
         outline: 2px solid rgba(13, 107, 102, 0.35);
         outline-offset: 2px;
         border-radius: 10px;
       }
 
       .answer-links a,
-      #sources a {
+      #referenced-sources a,
+      #other-sources a {
         color: var(--accent-strong);
         overflow-wrap: anywhere;
         word-break: break-word;
@@ -460,9 +470,16 @@
 
       <section class="panel" aria-live="polite">
         <p id="sources-label" class="label">Sources Consulted</p>
-        <ol id="sources">
-          <li>Web search sources will appear here after a briefing is generated.</li>
-        </ol>
+        <div id="referenced-sources-group" class="sources-group">
+          <p id="referenced-sources-label" class="answer-links-label">Referenced Sources</p>
+          <ol id="referenced-sources">
+            <li>Web search sources will appear here after a briefing is generated.</li>
+          </ol>
+        </div>
+        <div id="other-sources-group" class="sources-group" hidden>
+          <p id="other-sources-label" class="answer-links-label">Other Consulted Sources</p>
+          <ul id="other-sources"></ul>
+        </div>
       </section>
     </main>
 
@@ -489,8 +506,11 @@
           highlightNoteExclude:
             "Select text in any answer to exclude it from the article. Excluded passages are marked in red.",
           sourcesLabel: "Sources Consulted",
+          referencedSourcesLabel: "Referenced Sources",
+          otherSourcesLabel: "Other Consulted Sources",
           sourcesAfterBriefing: "Web search sources will appear here after a briefing is generated.",
           sourcesEmpty: "No web sources were returned for this briefing.",
+          referencedSourcesEmpty: "No sources are directly referenced by the answers.",
           includedExcerptsLabel: "Included Excerpts",
           includedBeforeBriefing:
             "The included material for each configured question will appear here after a briefing is generated.",
@@ -581,9 +601,12 @@
           highlightNoteExclude:
             "Selecteer tekst in een antwoord om die uit het artikel uit te sluiten. Uitgesloten passages worden rood gemarkeerd.",
           sourcesLabel: "Geraadpleegde bronnen",
+          referencedSourcesLabel: "Genoemde bronnen",
+          otherSourcesLabel: "Overige geraadpleegde bronnen",
           sourcesAfterBriefing:
             "Bronnen uit web search verschijnen hier zodra er een briefing is gegenereerd.",
           sourcesEmpty: "Er zijn geen webbronnen teruggegeven voor deze briefing.",
+          referencedSourcesEmpty: "Er zijn geen bronnen direct aan de antwoorden gekoppeld.",
           includedExcerptsLabel: "Opgenomen fragmenten",
           includedBeforeBriefing:
             "Het opgenomen materiaal per ingestelde vraag verschijnt hier zodra er een briefing is gegenereerd.",
@@ -688,8 +711,13 @@
       const questionPreview = document.getElementById("question-preview");
       const answersLabel = document.getElementById("answers-label");
       const answers = document.getElementById("answers");
-      const sources = document.getElementById("sources");
       const sourcesLabel = document.getElementById("sources-label");
+      const referencedSourcesGroup = document.getElementById("referenced-sources-group");
+      const referencedSourcesLabel = document.getElementById("referenced-sources-label");
+      const referencedSources = document.getElementById("referenced-sources");
+      const otherSourcesGroup = document.getElementById("other-sources-group");
+      const otherSourcesLabel = document.getElementById("other-sources-label");
+      const otherSources = document.getElementById("other-sources");
       const highlightNote = document.getElementById("highlight-note");
       const selectionConfigLink = document.getElementById("selection-config-link");
       const selectionsLabel = document.getElementById("selections-label");
@@ -848,50 +876,102 @@
         });
       }
 
-      function buildDisplaySources(sourceItems = briefingState.sources, answerItems = briefingState.answers) {
-        const orderedSources = [];
-        const seen = new Set();
+      function buildSourceLookup(sourceItems = briefingState.sources) {
+        const sourceLookup = new Map();
+        if (!Array.isArray(sourceItems)) {
+          return sourceLookup;
+        }
 
-        const addSource = (source) => {
+        sourceItems.forEach((source) => {
           if (!source || typeof source !== "object") {
             return;
           }
 
           const url = String(source.url || "").trim();
-          if (!url || seen.has(url)) {
+          if (!url || sourceLookup.has(url)) {
             return;
           }
 
-          seen.add(url);
-          orderedSources.push({
+          sourceLookup.set(url, {
             title: String(source.title || "").trim(),
             url,
           });
-        };
+        });
 
-        if (Array.isArray(sourceItems)) {
-          sourceItems.forEach(addSource);
+        return sourceLookup;
+      }
+
+      function buildReferencedSources(
+        answerItems = briefingState.answers,
+        sourceItems = briefingState.sources
+      ) {
+        const referencedSources = [];
+        const seen = new Set();
+        const sourceLookup = buildSourceLookup(sourceItems);
+
+        if (!Array.isArray(answerItems)) {
+          return referencedSources;
         }
 
-        if (Array.isArray(answerItems)) {
-          answerItems.forEach((item) => {
-            if (!item || !Array.isArray(item.links)) {
+        answerItems.forEach((item) => {
+          if (!item || !Array.isArray(item.links)) {
+            return;
+          }
+
+          uniqueUrls(item.links.map((url) => String(url || "").trim())).forEach((url) => {
+            if (!url || seen.has(url)) {
               return;
             }
 
-            uniqueUrls(item.links.map((url) => String(url || "").trim())).forEach((url) =>
-              addSource({ title: "", url })
-            );
+            seen.add(url);
+            referencedSources.push(sourceLookup.get(url) || { title: "", url });
           });
-        }
+        });
 
-        return orderedSources;
+        return referencedSources;
       }
 
-      function buildSourceIndexMap(sourceItems = briefingState.sources, answerItems = briefingState.answers) {
-        const displaySources = buildDisplaySources(sourceItems, answerItems);
+      function buildOtherConsultedSources(
+        sourceItems = briefingState.sources,
+        answerItems = briefingState.answers
+      ) {
+        const referencedUrls = new Set(
+          buildReferencedSources(answerItems, sourceItems).map((source) => source.url)
+        );
+        const otherSources = [];
+
+        if (!Array.isArray(sourceItems)) {
+          return otherSources;
+        }
+
+        sourceItems.forEach((source) => {
+          if (!source || typeof source !== "object") {
+            return;
+          }
+
+          const url = String(source.url || "").trim();
+          if (!url || referencedUrls.has(url)) {
+            return;
+          }
+
+          otherSources.push({
+            title: String(source.title || "").trim(),
+            url,
+          });
+        });
+
+        return uniqueUrls(otherSources.map((source) => source.url)).map(
+          (url) => sourceItems.find((source) => String(source?.url || "").trim() === url) || { title: "", url }
+        );
+      }
+
+      function buildReferencedSourceIndexMap(
+        answerItems = briefingState.answers,
+        sourceItems = briefingState.sources
+      ) {
+        const referencedSources = buildReferencedSources(answerItems, sourceItems);
         const sourceIndexMap = new Map();
-        displaySources.forEach((source, index) => {
+        referencedSources.forEach((source, index) => {
           sourceIndexMap.set(source.url, index + 1);
         });
         return sourceIndexMap;
@@ -1248,7 +1328,7 @@
 
       function renderAnswers(items) {
         answers.replaceChildren();
-        const sourceIndexMap = buildSourceIndexMap(briefingState.sources, items);
+        const sourceIndexMap = buildReferencedSourceIndexMap(items, briefingState.sources);
 
         for (const item of items) {
           const card = document.createElement("article");
@@ -1280,7 +1360,7 @@
               const sourceIndex = sourceIndexMap.get(url);
               if (sourceIndex) {
                 const sourceJump = document.createElement("a");
-                sourceJump.href = `#source-${sourceIndex}`;
+                sourceJump.href = `#referenced-source-${sourceIndex}`;
                 sourceJump.className = "answer-source-jump";
                 sourceJump.textContent = `[${sourceIndex}]`;
                 sourceJump.addEventListener("click", (event) => {
@@ -1311,19 +1391,35 @@
         emptyMessage = text("sourcesEmpty"),
         answerItems = briefingState.answers
       ) {
-        sources.replaceChildren();
-        const displaySources = buildDisplaySources(items, answerItems);
+        referencedSources.replaceChildren();
+        otherSources.replaceChildren();
+        const referencedSourceItems = buildReferencedSources(answerItems, items);
+        const otherConsultedSourceItems = buildOtherConsultedSources(items, answerItems);
 
-        if (!displaySources.length) {
+        referencedSourcesLabel.textContent = text("referencedSourcesLabel");
+        otherSourcesLabel.textContent = text("otherSourcesLabel");
+
+        if (!referencedSourceItems.length && !otherConsultedSourceItems.length) {
           const item = document.createElement("li");
           item.textContent = emptyMessage;
-          sources.appendChild(item);
+          referencedSources.appendChild(item);
+          referencedSourcesGroup.hidden = false;
+          otherSourcesGroup.hidden = true;
           return;
         }
 
-        displaySources.forEach((source, index) => {
+        referencedSourcesGroup.hidden = false;
+        otherSourcesGroup.hidden = !otherConsultedSourceItems.length;
+
+        if (!referencedSourceItems.length) {
           const item = document.createElement("li");
-          item.id = `source-${index + 1}`;
+          item.textContent = text("referencedSourcesEmpty");
+          referencedSources.appendChild(item);
+        }
+
+        referencedSourceItems.forEach((source, index) => {
+          const item = document.createElement("li");
+          item.id = `referenced-source-${index + 1}`;
           item.tabIndex = -1;
           const link = document.createElement("a");
           link.href = source.url;
@@ -1331,20 +1427,31 @@
           link.rel = "noreferrer noopener";
           link.textContent = source.url;
           item.append(link);
-          sources.appendChild(item);
+          referencedSources.appendChild(item);
+        });
+
+        otherConsultedSourceItems.forEach((source) => {
+          const item = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = source.url;
+          link.target = "_blank";
+          link.rel = "noreferrer noopener";
+          link.textContent = source.url;
+          item.append(link);
+          otherSources.appendChild(item);
         });
       }
 
       function focusSourceEntry(sourceIndex) {
-        const target = document.getElementById(`source-${sourceIndex}`);
+        const target = document.getElementById(`referenced-source-${sourceIndex}`);
         if (!target) {
           return;
         }
 
         if (window.history && typeof window.history.replaceState === "function") {
-          window.history.replaceState(null, "", `#source-${sourceIndex}`);
+          window.history.replaceState(null, "", `#referenced-source-${sourceIndex}`);
         } else {
-          window.location.hash = `source-${sourceIndex}`;
+          window.location.hash = `referenced-source-${sourceIndex}`;
         }
 
         target.scrollIntoView({ behavior: "smooth", block: "nearest" });
