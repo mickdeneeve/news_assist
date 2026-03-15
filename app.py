@@ -795,7 +795,7 @@ def normalize_snapshot_sources(raw_sources: object, edition: str) -> list[dict[s
             continue
 
         seen_urls.add(url)
-        normalized.append({"title": title or url, "url": url})
+        normalized.append({"title": title, "url": url})
 
     return normalized
 
@@ -975,7 +975,7 @@ def extract_web_search_sources(payload: dict[str, object], edition: str) -> list
                 continue
 
             seen_urls.add(url)
-            sources.append({"title": title or url, "url": url})
+            sources.append({"title": title, "url": url})
 
     return sources
 

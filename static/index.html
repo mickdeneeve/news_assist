@@ -231,6 +231,10 @@
         word-break: break-word;
       }
 
+      .source-title {
+        color: var(--text);
+      }
+
       .highlight-note {
         margin: 0;
         margin-top: 1rem;
@@ -1210,6 +1214,20 @@
         }
       }
 
+      function sourceDisplayTitle(source) {
+        const rawTitle = String(source?.title || "").trim();
+        const rawUrl = String(source?.url || "").trim();
+        if (rawTitle && rawTitle !== rawUrl) {
+          return rawTitle;
+        }
+
+        try {
+          return new URL(rawUrl).hostname.replace(/^www\./, "") || rawUrl;
+        } catch (error) {
+          return rawUrl;
+        }
+      }
+
       function renderSources(items, emptyMessage = text("sourcesEmpty")) {
         sources.replaceChildren();
 
@@ -1222,12 +1240,15 @@
 
         for (const source of items) {
           const item = document.createElement("li");
+          const title = document.createElement("span");
+          title.className = "source-title";
+          title.textContent = sourceDisplayTitle(source);
           const link = document.createElement("a");
           link.href = source.url;
           link.target = "_blank";
           link.rel = "noreferrer noopener";
-          link.textContent = source.title || source.url;
-          item.appendChild(link);
+          link.textContent = source.url;
+          item.append(title, document.createTextNode(" "), link);
           sources.appendChild(item);
         }
       }
