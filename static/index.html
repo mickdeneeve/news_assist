@@ -1220,13 +1220,13 @@
         if (
           rawTitle &&
           rawTitle !== rawUrl &&
-          !looksLikeSourceSiteTitle(rawTitle, rawUrl) &&
-          !looksLikeHexishSourceTitle(rawTitle)
+          !looksLikeHexishSourceTitle(rawTitle) &&
+          !looksLikePrivacyGateTitle(rawTitle)
         ) {
           return rawTitle;
         }
 
-        return "";
+        return sourceHostnameTitle(rawUrl);
       }
 
       function normalizeSourceKey(value) {
@@ -1262,6 +1262,28 @@
         return /^[a-f0-9]{12,}$/i.test(normalizeSourceKey(title));
       }
 
+      function looksLikePrivacyGateTitle(title) {
+        const lowered = String(title || "").toLowerCase();
+        return [
+          "privacy gate",
+          "cookie consent",
+          "cookies",
+          "privacy instellingen",
+          "privacy settings",
+          "toestemming",
+          "accept cookies",
+          "dpg media privacy gate",
+        ].some((pattern) => lowered.includes(pattern));
+      }
+
+      function sourceHostnameTitle(url) {
+        try {
+          return new URL(url).hostname.replace(/^www\./, "");
+        } catch (error) {
+          return "";
+        }
+      }
+
       function sourceNeedsNormalization(source) {
         const rawTitle = String(source?.title || "").trim();
         const rawUrl = String(source?.url || "").trim();
@@ -1275,7 +1297,8 @@
 
         return (
           looksLikeSourceSiteTitle(rawTitle, rawUrl) ||
-          looksLikeHexishSourceTitle(rawTitle)
+          looksLikeHexishSourceTitle(rawTitle) ||
+          looksLikePrivacyGateTitle(rawTitle)
         );
       }
 

@@ -92,6 +92,20 @@ TITLE_TAG_PATTERN = re.compile(r"<title\b[^>]*>([\s\S]*?)</title>", re.IGNORECAS
 H1_TAG_PATTERN = re.compile(r"<h1\b[^>]*>([\s\S]*?)</h1>", re.IGNORECASE)
 HEXISH_TITLE_PATTERN = re.compile(r"^[a-f0-9]{12,}$", re.IGNORECASE)
 TITLE_SEPARATORS = (" | ", " - ", " — ", " – ", " :: ", " / ")
+PRIVACY_GATE_PATTERNS = (
+    "privacy gate",
+    "cookie consent",
+    "cookies",
+    "privacy instellingen",
+    "privacy instellingen beheren",
+    "privacy settings",
+    "consent",
+    "toestemming",
+    "manage your privacy",
+    "manage privacy settings",
+    "accept cookies",
+    "dpg media privacy gate",
+)
 BACKEND_TEXT = {
     "en": {
         "openai_error_default": "OpenAI request failed.",
@@ -599,7 +613,19 @@ def looks_like_site_name(value: str, url: str) -> bool:
     return normalized_value in {candidate for candidate in candidates if candidate}
 
 
-def source_title_looks_bad(title: str, url: str) -> bool:
+def looks_like_privacy_gate_title(title: str) -> bool:
+    lowered = normalize_source_title_text(title).lower()
+    if not lowered:
+        return False
+
+    return any(pattern in lowered for pattern in PRIVACY_GATE_PATTERNS)
+
+
+def title_is_hexish(title: str) -> bool:
+    return bool(HEXISH_TITLE_PATTERN.fullmatch(normalize_source_key(title)))
+
+
+def source_title_is_unusable(title: str, url: str) -> bool:
     normalized_title = normalize_source_title_text(title)
     if not normalized_title:
         return True
@@ -607,11 +633,18 @@ def source_title_looks_bad(title: str, url: str) -> bool:
     if normalized_title == url:
         return True
 
-    collapsed = normalize_source_key(normalized_title)
-    if HEXISH_TITLE_PATTERN.fullmatch(collapsed):
+    if title_is_hexish(normalized_title):
         return True
 
-    return looks_like_site_name(normalized_title, url)
+    return looks_like_privacy_gate_title(normalized_title)
+
+
+def source_title_is_article_like(title: str, url: str) -> bool:
+    normalized_title = normalize_source_title_text(title)
+    if source_title_is_unusable(normalized_title, url):
+        return False
+
+    return not looks_like_site_name(normalized_title, url)
 
 
 def strip_site_suffix(title: str, url: str) -> str:
@@ -630,6 +663,50 @@ def strip_site_suffix(title: str, url: str) -> str:
             return leading
 
     return cleaned
+
+
+def derive_source_title_from_url(url: str) -> str:
+    try:
+        path = urlparse(url).path
+    except ValueError:
+        return ""
+
+    segments = [
+        segment
+        for segment in (part.strip() for part in path.split("/"))
+        if segment and re.search(r"[a-z]", segment, re.IGNORECASE)
+    ]
+    generic_segments = {"article", "articles", "news", "story", "stories", "world", "nl", "en"}
+
+    for segment in reversed(segments):
+        if segment.lower() in generic_segments:
+            continue
+
+        candidate = (
+            segment.replace("_", " ")
+            .replace("-", " ")
+            .replace("+", " ")
+            .replace(".html", " ")
+        )
+        candidate = HTML_WHITESPACE_PATTERN.sub(" ", candidate).strip(" /")
+        candidate = re.sub(r"^\d+\s+", "", candidate).strip()
+        if len(candidate) < 6:
+            continue
+        if title_is_hexish(candidate):
+            continue
+        if looks_like_privacy_gate_title(candidate):
+            continue
+        if normalize_source_key(candidate).isdigit():
+            continue
+
+        return candidate[:1].upper() + candidate[1:]
+
+    return ""
+
+
+def hostname_display_title(url: str) -> str:
+    hostname, _ = hostname_variants(url)
+    return hostname
 
 
 def wikipedia_article_title(url: str) -> tuple[str, str] | None:
@@ -776,11 +853,22 @@ def fetch_source_page_title(url: str) -> str:
         extract_tag_text(document, TITLE_TAG_PATTERN),
     ]
 
+    best_fallback = ""
     for candidate in candidate_titles:
         cleaned = strip_site_suffix(candidate, url)
-        if cleaned and not source_title_looks_bad(cleaned, url):
+        if not cleaned:
+            continue
+
+        if source_title_is_article_like(cleaned, url):
             SOURCE_TITLE_CACHE[url] = cleaned
             return cleaned
+
+        if not best_fallback and not source_title_is_unusable(cleaned, url):
+            best_fallback = cleaned
+
+    if best_fallback:
+        SOURCE_TITLE_CACHE[url] = best_fallback
+        return best_fallback
 
     SOURCE_TITLE_CACHE[url] = ""
     return ""
@@ -792,12 +880,26 @@ def resolve_source_title(url: str, raw_title: object) -> str:
         return article[1]
 
     supplied_title = strip_site_suffix(str(raw_title or ""), url)
-    if supplied_title and not source_title_looks_bad(supplied_title, url):
+    if supplied_title and source_title_is_article_like(supplied_title, url):
         return supplied_title
 
     fetched_title = fetch_source_page_title(url)
-    if fetched_title and not source_title_looks_bad(fetched_title, url):
+    if fetched_title and source_title_is_article_like(fetched_title, url):
         return fetched_title
+
+    if supplied_title and not source_title_is_unusable(supplied_title, url):
+        return supplied_title
+
+    if fetched_title and not source_title_is_unusable(fetched_title, url):
+        return fetched_title
+
+    derived_title = derive_source_title_from_url(url)
+    if derived_title:
+        return derived_title
+
+    hostname_title = hostname_display_title(url)
+    if hostname_title:
+        return hostname_title
 
     return ""
 
