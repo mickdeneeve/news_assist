@@ -1377,6 +1377,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._handle_snapshot_translation_request()
             return
 
+        if route == "/api/normalize-sources":
+            self._handle_source_normalization_request()
+            return
+
         if route == "/api/config":
             self._handle_config_update()
             return
@@ -1530,6 +1534,24 @@ class AppHandler(SimpleHTTPRequestHandler):
                 "article_query": article_query,
                 "article_word_count": reporting_config["article_word_count"],
                 "article_selection_mode": article_selection_mode,
+            },
+        )
+
+    def _handle_source_normalization_request(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+
+        reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
+        language = reporting_config["language"]
+        edition = normalize_edition(payload.get("edition") or payload.get("snapshot_edition"))
+        sources = normalize_snapshot_sources(payload.get("sources"), edition)
+        self._send_json(
+            200,
+            {
+                "sources": sources,
+                "edition": edition,
+                "language": edition_language(edition) or language,
             },
         )
 
