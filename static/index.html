@@ -231,10 +231,6 @@
         word-break: break-word;
       }
 
-      .source-title {
-        color: var(--text);
-      }
-
       .highlight-note {
         margin: 0;
         margin-top: 1rem;
@@ -1214,127 +1210,6 @@
         }
       }
 
-      function sourceDisplayTitle(source) {
-        const rawTitle = String(source?.title || "").trim();
-        const rawUrl = String(source?.url || "").trim();
-        if (
-          rawTitle &&
-          rawTitle !== rawUrl &&
-          !looksLikeHexishSourceTitle(rawTitle) &&
-          !looksLikePrivacyGateTitle(rawTitle)
-        ) {
-          return rawTitle;
-        }
-
-        return sourceHostnameTitle(rawUrl);
-      }
-
-      function normalizeSourceKey(value) {
-        return String(value || "")
-          .toLowerCase()
-          .replace(/^https?:\/\//, "")
-          .replace(/^www\./, "")
-          .replace(/[^a-z0-9]+/g, "");
-      }
-
-      function looksLikeSourceSiteTitle(title, url) {
-        const normalizedTitle = normalizeSourceKey(title);
-        if (!normalizedTitle) {
-          return false;
-        }
-
-        try {
-          const hostname = new URL(url).hostname.replace(/^www\./, "");
-          const normalizedHostname = normalizeSourceKey(hostname);
-          const root = normalizeSourceKey(hostname.split(".")[0] || "");
-          return (
-            normalizedTitle === normalizedHostname ||
-            normalizedTitle === root ||
-            normalizedTitle === `${root}news` ||
-            normalizedTitle === `${root}nieuws`
-          );
-        } catch (error) {
-          return false;
-        }
-      }
-
-      function looksLikeHexishSourceTitle(title) {
-        return /^[a-f0-9]{12,}$/i.test(normalizeSourceKey(title));
-      }
-
-      function looksLikePrivacyGateTitle(title) {
-        const lowered = String(title || "").toLowerCase();
-        return [
-          "privacy gate",
-          "cookie consent",
-          "cookies",
-          "privacy instellingen",
-          "privacy settings",
-          "toestemming",
-          "accept cookies",
-          "dpg media privacy gate",
-        ].some((pattern) => lowered.includes(pattern));
-      }
-
-      function sourceHostnameTitle(url) {
-        try {
-          return new URL(url).hostname.replace(/^www\./, "");
-        } catch (error) {
-          return "";
-        }
-      }
-
-      function sourceNeedsNormalization(source) {
-        const rawTitle = String(source?.title || "").trim();
-        const rawUrl = String(source?.url || "").trim();
-        if (!rawUrl) {
-          return false;
-        }
-
-        if (!rawTitle || rawTitle === rawUrl) {
-          return true;
-        }
-
-        return (
-          looksLikeSourceSiteTitle(rawTitle, rawUrl) ||
-          looksLikeHexishSourceTitle(rawTitle) ||
-          looksLikePrivacyGateTitle(rawTitle)
-        );
-      }
-
-      async function refreshStoredSourceTitles() {
-        if (!briefingState.hasBriefing || !Array.isArray(briefingState.sources) || !briefingState.sources.length) {
-          return;
-        }
-
-        if (!briefingState.sources.some(sourceNeedsNormalization)) {
-          return;
-        }
-
-        try {
-          const response = await fetch("/api/normalize-sources", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              edition: briefingState.edition,
-              sources: briefingState.sources,
-            }),
-          });
-          const payload = await response.json();
-          if (!response.ok) {
-            throw new Error(payload.error || `HTTP ${response.status}`);
-          }
-
-          const normalizedSources = Array.isArray(payload.sources) ? payload.sources : [];
-          updateBriefingState({ sources: normalizedSources });
-          renderSources(briefingState.sources);
-        } catch (error) {
-          console.error("Could not refresh stored source titles.", error);
-        }
-      }
-
       function renderSources(items, emptyMessage = text("sourcesEmpty")) {
         sources.replaceChildren();
 
@@ -1347,20 +1222,12 @@
 
         for (const source of items) {
           const item = document.createElement("li");
-          const titleText = sourceDisplayTitle(source);
           const link = document.createElement("a");
           link.href = source.url;
           link.target = "_blank";
           link.rel = "noreferrer noopener";
           link.textContent = source.url;
-          if (titleText) {
-            const title = document.createElement("span");
-            title.className = "source-title";
-            title.textContent = titleText;
-            item.append(title, document.createTextNode(" "), link);
-          } else {
-            item.append(link);
-          }
+          item.append(link);
           sources.appendChild(item);
         }
       }
@@ -2022,7 +1889,6 @@
       articleForm.addEventListener("submit", submitArticle);
       applyTranslations();
       restoreBriefingState();
-      refreshStoredSourceTitles();
       loadConfig();
     </script>
   </body>
