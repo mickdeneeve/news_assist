@@ -305,8 +305,15 @@
         line-height: 1.5;
       }
 
-      .article-config-note a {
+      .article-config-note a,
+      .selection-config-note a {
         color: var(--accent-strong);
+      }
+
+      .selection-config-note {
+        margin: 0.65rem 0 0;
+        color: var(--muted);
+        line-height: 1.5;
       }
 
       @media (max-width: 700px) {
@@ -374,6 +381,11 @@
 
         <p id="highlight-note" class="highlight-note">
           Select text in any answer to exclude it from the article. Excluded passages are marked in red.
+        </p>
+        <p id="selection-config-note" class="selection-config-note">
+          <a id="selection-config-link" href="/config">
+            Switch between “Exclude in red” and “Include in yellow” on the configuration page.
+          </a>
         </p>
       </section>
 
@@ -445,6 +457,8 @@
           articleConfigLoading: "Loading the configured article request from the configuration page...",
           articleConfigSummary: ({ description, query }) => `${description} Article request: ${query}`,
           editConfigLink: "Edit this on the configuration page.",
+          selectionConfigHint: ({ excludeChoice, includeChoice }) =>
+            `Switch between “${excludeChoice}” and “${includeChoice}” on the configuration page.`,
           assembleArticleButton: "Assemble Article",
           articleStatusIncludeDefault: "Select passages to include, then draft the article.",
           articleStatusExcludeDefault:
@@ -537,6 +551,8 @@
             "De ingestelde artikelopdracht wordt geladen vanaf de configuratiepagina...",
           articleConfigSummary: ({ description, query }) => `${description} Artikelopdracht: ${query}`,
           editConfigLink: "Bewerk dit op de configuratiepagina.",
+          selectionConfigHint: ({ excludeChoice, includeChoice }) =>
+            `Wissel tussen ‘${excludeChoice}’ en ‘${includeChoice}’ op de configuratiepagina.`,
           assembleArticleButton: "Artikel samenstellen",
           articleStatusIncludeDefault:
             "Selecteer passages om op te nemen en stel daarna het artikel op.",
@@ -633,6 +649,7 @@
       const sources = document.getElementById("sources");
       const sourcesLabel = document.getElementById("sources-label");
       const highlightNote = document.getElementById("highlight-note");
+      const selectionConfigLink = document.getElementById("selection-config-link");
       const selectionsLabel = document.getElementById("selections-label");
       const highlightsList = document.getElementById("highlights-list");
       const clearHighlightsButton = document.getElementById("clear-highlights");
@@ -937,6 +954,13 @@
             highlightNoteTimer = null;
           }, 1800);
         }
+      }
+
+      function renderSelectionConfigNote() {
+        selectionConfigLink.textContent = text("selectionConfigHint", {
+          excludeChoice: text("selectionChoiceExclude"),
+          includeChoice: text("selectionChoiceInclude"),
+        });
       }
 
       function getAnswerText(question, items = briefingState.answers) {
@@ -1282,6 +1306,7 @@
         renderHighlights();
         renderArticleDraft();
         renderHighlightNote();
+        renderSelectionConfigNote();
         renderMismatchBanner();
         renderArticleConfig(currentResolvedArticleQuery || defaultArticleConfigNote(), briefingState.selectionMode);
         if (briefingState.hasBriefing) {
