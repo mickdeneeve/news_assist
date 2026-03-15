@@ -1217,15 +1217,76 @@
       function sourceDisplayTitle(source) {
         const rawTitle = String(source?.title || "").trim();
         const rawUrl = String(source?.url || "").trim();
+        if (rawTitle && rawTitle !== rawUrl && !looksLikeSourceSiteTitle(rawTitle, rawUrl)) {
+          return rawTitle;
+        }
+
+        const derivedTitle = deriveSourceTitleFromUrl(rawUrl);
+        if (derivedTitle) {
+          return derivedTitle;
+        }
+
         if (rawTitle && rawTitle !== rawUrl) {
           return rawTitle;
         }
 
-        try {
-          return new URL(rawUrl).hostname.replace(/^www\./, "") || rawUrl;
-        } catch (error) {
-          return rawUrl;
+        return rawUrl;
+      }
+
+      function normalizeSourceKey(value) {
+        return String(value || "")
+          .toLowerCase()
+          .replace(/^https?:\/\//, "")
+          .replace(/^www\./, "")
+          .replace(/[^a-z0-9]+/g, "");
+      }
+
+      function looksLikeSourceSiteTitle(title, url) {
+        const normalizedTitle = normalizeSourceKey(title);
+        if (!normalizedTitle) {
+          return false;
         }
+
+        try {
+          const hostname = new URL(url).hostname.replace(/^www\./, "");
+          const normalizedHostname = normalizeSourceKey(hostname);
+          const root = normalizeSourceKey(hostname.split(".")[0] || "");
+          return (
+            normalizedTitle === normalizedHostname ||
+            normalizedTitle === root ||
+            normalizedTitle === `${root}news` ||
+            normalizedTitle === `${root}nieuws`
+          );
+        } catch (error) {
+          return false;
+        }
+      }
+
+      function deriveSourceTitleFromUrl(url) {
+        try {
+          const { pathname } = new URL(url);
+          const segments = pathname
+            .split("/")
+            .map((segment) => decodeURIComponent(segment))
+            .filter((segment) => segment && /[a-z]/i.test(segment));
+
+          for (let index = segments.length - 1; index >= 0; index -= 1) {
+            const candidate = segments[index]
+              .replace(/\.[a-z0-9]+$/i, "")
+              .replace(/[-_+]+/g, " ")
+              .replace(/\bamp\b/gi, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+
+            if (candidate.length >= 5) {
+              return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+            }
+          }
+        } catch (error) {
+          return "";
+        }
+
+        return "";
       }
 
       function renderSources(items, emptyMessage = text("sourcesEmpty")) {
