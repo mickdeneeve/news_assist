@@ -202,33 +202,6 @@
         user-select: text;
       }
 
-      .answer-prose {
-        user-select: text;
-      }
-
-      .answer-inline-citations {
-        display: inline-flex;
-        flex-wrap: wrap;
-        gap: 0.3rem;
-        margin-left: 0.45rem;
-        white-space: normal;
-        user-select: none;
-        -webkit-user-select: none;
-      }
-
-      .answer-inline-citation {
-        color: var(--accent);
-        font-weight: 700;
-        text-decoration: none;
-        user-select: none;
-        -webkit-user-select: none;
-      }
-
-      .answer-inline-citation:hover,
-      .answer-inline-citation:focus-visible {
-        text-decoration: underline;
-      }
-
       .answer-links-block {
         margin-top: 0.9rem;
         padding-top: 0.85rem;
@@ -1367,36 +1340,7 @@
 
           const body = document.createElement("p");
           body.className = "answer-text";
-          const prose = document.createElement("span");
-          prose.className = "answer-prose";
-          prose.appendChild(buildAnswerFragment(item.question, item.answer));
-          body.appendChild(prose);
-
-          const inlineCitationIndices = uniqueUrls(
-            (Array.isArray(item.links) ? item.links : []).map((url) => String(url || "").trim())
-          )
-            .map((url) => sourceIndexMap.get(url))
-            .filter((sourceIndex) => Number.isInteger(sourceIndex));
-
-          if (inlineCitationIndices.length) {
-            const inlineCitations = document.createElement("span");
-            inlineCitations.className = "answer-inline-citations";
-            inlineCitations.setAttribute("aria-label", text("answerLinksLabel"));
-
-            inlineCitationIndices.forEach((sourceIndex) => {
-              const citation = document.createElement("a");
-              citation.href = `#referenced-source-${sourceIndex}`;
-              citation.className = "answer-inline-citation";
-              citation.textContent = `[${sourceIndex}]`;
-              citation.addEventListener("click", (event) => {
-                event.preventDefault();
-                focusSourceEntry(sourceIndex);
-              });
-              inlineCitations.appendChild(citation);
-            });
-
-            body.appendChild(inlineCitations);
-          }
+          body.appendChild(buildAnswerFragment(item.question, item.answer));
 
           card.append(heading, body);
 
@@ -1683,7 +1627,7 @@
         if (current && current.nodeType === Node.TEXT_NODE) {
           current = current.parentElement;
         }
-        return current && current.closest ? current.closest(".answer-prose") : null;
+        return current && current.closest ? current.closest(".answer-text") : null;
       }
 
       function textOffsetWithin(container, node, offset) {
