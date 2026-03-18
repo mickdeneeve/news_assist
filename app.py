@@ -1,3 +1,19 @@
+"""
+News Assist backend.
+
+This file contains the local Python server for the app. It keeps five concerns
+in one place:
+- local configuration loading from `.env` and `journalism_config.json`
+- edition defaults and localized prompt text
+- OpenAI request/response normalization
+- the small auto-reloader used during local development
+- the JSON API and static-file serving used by the browser frontend
+
+The frontend owns most interaction state. The backend mainly validates input,
+persists configuration, calls OpenAI, and returns normalized payloads that the
+browser can render and store safely.
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,23 +28,6 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
-
-"""
-News Assist backend.
-
-This file deliberately keeps the server in one place:
-- local configuration loading
-- edition and prompt defaults
-- OpenAI request/response normalization
-- auto-reload support for local development
-- the small JSON API used by the browser app
-
-The frontend owns most interaction state. The backend mainly:
-- persists local config
-- validates browser input
-- calls OpenAI
-- normalizes model/tool output into stable shapes for the UI
-"""
 
 
 ROOT_DIR = Path(__file__).parent
