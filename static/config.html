@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Briefing Configuration</title>
     <style>
+      /* Visual tokens shared across the configuration page. */
       :root {
         --bg-top: #f7efe2;
         --bg-bottom: #d6ebe4;
@@ -292,6 +293,8 @@
   </head>
   <body>
     <main>
+      <!-- Edition selector: this page edits the same edition concept that the
+           briefing page uses for language plus source-bias behavior. -->
       <div class="edition-bar">
         <p id="edition-label" class="edition-label">Region (Language)</p>
         <div class="edition-toggle" role="group" aria-labelledby="edition-label">
@@ -306,6 +309,7 @@
         </div>
       </div>
 
+      <!-- Primary navigation between the two app views. -->
       <nav class="nav" aria-label="Primary">
         <a id="nav-briefing" href="/">Briefing</a>
         <a id="nav-config" class="active" href="/config">Configuration</a>
@@ -317,12 +321,15 @@
       </p>
 
       <form id="config-form">
+        <!-- Model selection controls which OpenAI model the backend calls for
+             briefing, translation, and article drafting requests. -->
         <section class="field">
           <label id="model-label" for="openai-model">OpenAI Model</label>
           <select id="openai-model" name="openai_model" required></select>
           <p class="hint" id="model-hint">Loading the current model list...</p>
         </section>
 
+        <!-- Ordered list of reporting questions used for every briefing run. -->
         <section class="field">
           <label id="questions-label">Reporting Questions</label>
           <div id="questions-list" class="question-list"></div>
@@ -333,6 +340,8 @@
           </div>
         </section>
 
+        <!-- Template prompt for article drafting. The placeholder N is replaced
+             with the configured target word count before the backend sends it. -->
         <section class="field">
           <label id="article-query-label" for="article-query">Article Query</label>
           <textarea
@@ -344,12 +353,15 @@
           <p class="hint" id="article-query-hint">Use <code>N</code> as the placeholder for the configured word count.</p>
         </section>
 
+        <!-- Numeric companion setting for the article prompt placeholder. -->
         <section class="field">
           <label id="article-word-count-label" for="article-word-count">Article Word Count</label>
           <input id="article-word-count" name="article_word_count" type="number" min="1" step="1" required />
           <p class="hint" id="article-preview">Loading article request preview...</p>
         </section>
 
+        <!-- Include/exclude mode controls how selections on the briefing page
+             are converted into the final article-input excerpts. -->
         <section class="field">
           <label id="article-selection-mode-label" for="article-selection-mode">Article Selection Mode</label>
           <select id="article-selection-mode" name="article_selection_mode" required>
@@ -361,6 +373,8 @@
           </p>
         </section>
 
+        <!-- Re-initialization clears tab-local briefing state and asks the local
+             backend process to restart so the app returns to a clean state. -->
         <section class="field">
           <label id="restart-label" for="restart-button">App Re-initialization</label>
           <p class="hint" id="restart-hint">
@@ -379,6 +393,14 @@
     </main>
 
     <script>
+      // ---------------------------------------------------------------------
+      // Edition defaults and localized copy
+      //
+      // This page edits configuration for both supported editions. The default
+      // question sets and article prompt templates live here so the page can
+      // switch editions locally without waiting for a backend round-trip.
+      // ---------------------------------------------------------------------
+
       const DEFAULT_EDITION = "international_en";
       const EDITIONS = {
         international_en: {
@@ -515,6 +537,16 @@
         },
       };
 
+      // ---------------------------------------------------------------------
+      // DOM references and runtime state
+      //
+      // The config page is smaller than the briefing page, but it still keeps a
+      // clear split between:
+      // - current edition/language state
+      // - current OpenAI model metadata
+      // - the editable form fields in the DOM
+      // ---------------------------------------------------------------------
+
       const form = document.getElementById("config-form");
       const editionButtons = Array.from(document.querySelectorAll(".edition-option"));
       const editionLabelNodes = Array.from(document.querySelectorAll("[data-edition-label]"));
@@ -552,6 +584,14 @@
       let currentLanguage = "en";
       let currentModelsError = null;
       let currentAvailableModels = [];
+
+      // ---------------------------------------------------------------------
+      // Edition and default-content helpers
+      //
+      // These functions decide when changing the edition should also swap the
+      // visible questions/article prompt. The important rule is: only replace
+      // content automatically if the user was still on the previous defaults.
+      // ---------------------------------------------------------------------
 
       function normalizeEdition(value) {
         return Object.prototype.hasOwnProperty.call(EDITIONS, value) ? value : DEFAULT_EDITION;
@@ -613,6 +653,14 @@
 
         modelHint.textContent = text("modelHintLoading");
       }
+
+      // ---------------------------------------------------------------------
+      // Dynamic form rendering
+      //
+      // Reporting questions are user-editable and unbounded in length, so the
+      // page renders them as a dynamic list of rows rather than as a fixed set
+      // of hard-coded inputs.
+      // ---------------------------------------------------------------------
 
       function addQuestionRow(value = "") {
         const row = document.createElement("div");
@@ -718,6 +766,8 @@
         });
       }
 
+      // applyTranslations() refreshes all visible copy from the current edition
+      // and then re-renders the dynamic controls whose labels also depend on it.
       function applyTranslations() {
         document.documentElement.lang = currentLanguage;
         document.title = text("documentTitle");
@@ -747,6 +797,9 @@
         renderArticlePreview();
       }
 
+      // Edition switches should feel safe: keep the user's custom content if
+      // they already diverged from the previous defaults, otherwise swap in the
+      // next edition's defaults automatically.
       function synchronizeDefaultContentOnEditionChange(previousEdition, nextEdition) {
         const currentQuestions = collectQuestions();
         if (arraysEqual(currentQuestions, defaultQuestions(previousEdition))) {
@@ -757,6 +810,13 @@
           articleQueryInput.value = defaultArticleQuery(nextEdition);
         }
       }
+
+      // ---------------------------------------------------------------------
+      // Backend synchronization
+      //
+      // loadConfig() hydrates the form from the backend's canonical state.
+      // saveConfig() sends the edited state back to that same canonical source.
+      // ---------------------------------------------------------------------
 
       async function loadConfig() {
         status.textContent = text("statusLoading");
@@ -841,6 +901,14 @@
         }
       }
 
+      // ---------------------------------------------------------------------
+      // Restart/re-initialization flow
+      //
+      // The backend restart temporarily makes the server unreachable. This small
+      // polling loop intentionally waits through that gap and only redirects the
+      // browser once a new server instance answers again.
+      // ---------------------------------------------------------------------
+
       function wait(delayMs) {
         return new Promise((resolve) => window.setTimeout(resolve, delayMs));
       }
@@ -912,6 +980,8 @@
         }
       }
 
+      // Final wiring: user interactions stay at the bottom so the functions
+      // above read as the page's behavior model and this block reads as startup.
       editionButtons.forEach((button) => {
         button.addEventListener("click", () => {
           const nextEdition = normalizeEdition(button.dataset.edition);

@@ -13,6 +13,23 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
+"""
+News Assist backend.
+
+This file deliberately keeps the server in one place:
+- local configuration loading
+- edition and prompt defaults
+- OpenAI request/response normalization
+- auto-reload support for local development
+- the small JSON API used by the browser app
+
+The frontend owns most interaction state. The backend mainly:
+- persists local config
+- validates browser input
+- calls OpenAI
+- normalizes model/tool output into stable shapes for the UI
+"""
+
 
 ROOT_DIR = Path(__file__).parent
 STATIC_DIR = ROOT_DIR / "static"
@@ -1181,6 +1198,8 @@ class RestartableHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, server_address, request_handler_class):
         super().__init__(server_address, request_handler_class)
+        # The config page can ask the app to restart itself. This flag lets the
+        # request handler communicate that intent back to the outer serve loop.
         self.restart_requested = False
 
 
@@ -1190,6 +1209,8 @@ class AppHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
+    # HEAD and GET both need the same route mapping because the app serves two
+    # friendly routes ("/" and "/config") on top of static HTML files.
     def do_HEAD(self) -> None:
         self._map_static_route()
         super().do_HEAD()
@@ -1219,6 +1240,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         self._map_static_route()
         super().do_GET()
 
+    # POST endpoints are kept as a small dispatcher so the browser can treat the
+    # backend as a focused JSON API rather than a large server-side app.
     def do_POST(self) -> None:
         route = urlparse(self.path).path
 
@@ -1248,6 +1271,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         self._send_json(404, {"error": backend_text(read_reporting_config(REPORTING_CONFIG_FILE)["language"], "route_not_found")})
 
+    # Briefing generation is the heaviest request in the app. It loads the
+    # current reporting configuration, asks OpenAI to answer the configured
+    # questions with web search enabled, and then normalizes the result into the
+    # answer/source structure that the frontend persists as a snapshot.
     def _handle_briefing_request(self) -> None:
         payload = self._read_json_body()
         if payload is None:
@@ -1324,6 +1351,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             },
         )
 
+    # Article drafting is downstream of the briefing flow. By the time this runs,
+    # the frontend has already reduced the current answers plus selections into
+    # the exact excerpt payload that should be treated as article input.
     def _handle_article_request(self) -> None:
         payload = self._read_json_body()
         if payload is None:
@@ -1394,6 +1424,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             },
         )
 
+    # Snapshot translation does not regenerate sourcing. It only re-renders the
+    # current briefing/article snapshot in another language, while preserving the
+    # same source URLs and snapshot provenance in the browser.
     def _handle_snapshot_translation_request(self) -> None:
         payload = self._read_json_body()
         if payload is None:
@@ -1481,6 +1514,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             },
         )
 
+    # Topic translation is intentionally narrower than snapshot translation: it
+    # only rewrites the topic line so the frontend can rebuild a briefing in the
+    # current edition without silently leaving the user's query in the old one.
     def _handle_topic_translation_request(self) -> None:
         payload = self._read_json_body()
         if payload is None:
@@ -1550,6 +1586,10 @@ class AppHandler(SimpleHTTPRequestHandler):
             },
         )
 
+    # Config updates are where the browser writes user choices back to disk.
+    # This method also upgrades default questions/article text when the edition
+    # changes, but only if the user had not customized those values away from
+    # the previous edition defaults.
     def _handle_config_update(self) -> None:
         payload = self._read_json_body()
         if payload is None:
@@ -1608,6 +1648,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         response_payload["message"] = backend_text(language, "config_saved")
         self._send_json(200, response_payload)
 
+    # Re-initialization is a two-step process:
+    # 1. acknowledge the request to the browser
+    # 2. shut the server down just after the response flushes
+    #
+    # The outer reloader or serve loop then brings the process back.
     def _handle_restart_request(self) -> None:
         language = read_reporting_config(REPORTING_CONFIG_FILE)["language"]
         self._send_json(
@@ -1627,6 +1672,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         time.sleep(0.2)
         self.server.shutdown()
 
+    # Every JSON endpoint uses this shared body parser so bad request handling
+    # stays consistent across briefing, article, translation, and config routes.
     def _read_json_body(self) -> dict[str, object] | None:
         language = read_reporting_config(REPORTING_CONFIG_FILE)["language"]
         try:
@@ -1648,6 +1695,9 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         return payload
 
+    # The browser needs one normalized config payload shape regardless of where
+    # the values originally came from (.env, journalism_config.json, defaults,
+    # or the live OpenAI models list). This method is that single shape.
     def _config_payload(self) -> dict[str, object]:
         reporting_config = read_reporting_config(REPORTING_CONFIG_FILE)
         language = reporting_config["language"]
@@ -1688,6 +1738,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
 
+# The serve loop runs the actual HTTP server. The reloader logic decides whether
+# this process is the long-lived parent supervisor or the child server instance.
 def serve() -> None:
     port = int(current_port())
     server = RestartableHTTPServer(("127.0.0.1", port), AppHandler)
@@ -1705,6 +1757,9 @@ def serve() -> None:
         os.execve(sys.executable, [sys.executable, str(ROOT_DIR / "app.py")], os.environ.copy())
 
 
+# main() chooses between two modes:
+# - child server mode: serve requests directly
+# - parent supervisor mode: watch Python files and restart the child on changes
 def main() -> None:
     if os.environ.get(RELOAD_ENV_VAR) == "1" or os.environ.get(DISABLE_RELOAD_ENV_VAR) == "1":
         serve()

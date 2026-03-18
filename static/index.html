@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Journalism Briefing Desk</title>
     <style>
+      /* Visual tokens shared across the briefing page. */
       :root {
         --bg-top: #f7efe2;
         --bg-bottom: #d6ebe4;
@@ -383,6 +384,7 @@
   </head>
   <body>
     <main>
+      <!-- Primary app navigation between briefing and configuration views. -->
       <nav class="nav" aria-label="Primary">
         <a id="nav-briefing" class="active" href="/">Briefing</a>
         <a id="nav-config" href="/config">Configuration</a>
@@ -391,6 +393,7 @@
       <h1 id="page-title">Journalism Briefing Desk</h1>
       <p id="page-intro">Enter a topic or event. The app will answer the reporting questions configured on the settings page.</p>
 
+      <!-- Shown only when the generated snapshot belongs to another edition. -->
       <section id="mismatch-banner" class="panel mismatch-banner" hidden>
         <p id="mismatch-label" class="label">Edition mismatch</p>
         <p id="mismatch-body" class="mismatch-body"></p>
@@ -400,6 +403,7 @@
         </div>
       </section>
 
+      <!-- Read-only preview of the configured reporting questions. -->
       <section class="panel" aria-live="polite">
         <p id="question-preview-label" class="label">Configured Questions</p>
         <ol id="question-preview">
@@ -407,6 +411,7 @@
         </ol>
       </section>
 
+      <!-- Root user input: the topic/event that triggers a new briefing run. -->
       <form id="briefing-form">
         <p id="query-label" class="label">Topic or Event</p>
         <textarea
@@ -422,6 +427,7 @@
         </div>
       </form>
 
+      <!-- Generated per-question briefing answers and answer-level source links. -->
       <section class="panel" aria-live="polite">
         <p id="answers-label" class="label">Answers</p>
         <div id="answers">
@@ -441,6 +447,8 @@
         </p>
       </section>
 
+      <!-- Normalized article input, derived from the current answers plus the
+           user's include/exclude selections. -->
       <section class="panel" aria-live="polite">
         <p id="selections-label" class="label">Included Excerpts</p>
         <ol id="highlights-list">
@@ -451,6 +459,7 @@
         </div>
       </section>
 
+      <!-- Article drafting controls and the final assembled draft output. -->
       <form id="article-form" class="panel">
         <p id="article-request-label" class="label">Configured Article Request</p>
         <p id="article-config-note" class="article-config-note">
@@ -468,6 +477,8 @@
         </div>
       </form>
 
+      <!-- Transparency section: sources explicitly referenced by answers first,
+           then the wider pool of consulted web-search sources. -->
       <section class="panel" aria-live="polite">
         <p id="sources-label" class="label">Sources Consulted</p>
         <div id="referenced-sources-group" class="sources-group">
@@ -484,6 +495,14 @@
     </main>
 
     <script>
+      // ---------------------------------------------------------------------
+      // UI copy and language data
+      //
+      // The briefing page is heavily text-driven, and nearly every interaction
+      // string is edition-sensitive. Keeping the copy together makes it easier
+      // to trace what the page will say in each language.
+      // ---------------------------------------------------------------------
+
       const COPY = {
         en: {
           documentTitle: "Journalism Briefing Desk",
@@ -682,6 +701,15 @@
           passageUpdated: ({ action }) => `Passage ${action}.`,
         },
       };
+
+      // ---------------------------------------------------------------------
+      // DOM references and runtime state
+      //
+      // The browser keeps a fairly rich local state object for the briefing
+      // page. These DOM references are grouped once up front so the later
+      // rendering functions can focus on behavior rather than querying the page
+      // repeatedly.
+      // ---------------------------------------------------------------------
 
       const STORAGE_KEY = "news_assist_briefing_state";
       const DEFAULT_EDITION = "international_en";
@@ -2218,6 +2246,9 @@
         }
       }
 
+      // Event wiring is kept at the bottom so a reader can treat the entire
+      // script above as "what each piece does" and this final block as
+      // "how the page starts and what user actions trigger those pieces".
       queryInput.addEventListener("input", () => {
         updateBriefingState({ query: queryInput.value });
       });
