@@ -132,6 +132,9 @@ BACKEND_TEXT = {
 }
 
 
+# Editions bundle three concerns together: UI language, output language, and
+# source-bias rules. Normalizing through the edition key keeps those aligned
+# even when older config payloads still send only a language value.
 def normalize_language(raw_language: object) -> str:
     language = str(raw_language or "").strip().lower()
     return language if language in SUPPORTED_LANGUAGES else str(
@@ -185,6 +188,8 @@ def backend_text(language: str, key: str, **kwargs: object) -> str:
     return template.format(**kwargs)
 
 
+# Keep .env handling intentionally small and predictable so users can edit it by
+# hand without adding a dependency just for local configuration.
 def parse_env_line(raw_line: str) -> tuple[str, str] | None:
     line = raw_line.strip()
     if not line or line.startswith("#") or "=" not in line:
@@ -461,6 +466,9 @@ def fetch_available_models(language: str) -> tuple[list[str], str | None]:
     return models, None
 
 
+# Prompt construction and response normalization live next to each other on
+# purpose: the app asks for a strict JSON shape, then defensively cleans up the
+# common ways the model still deviates from that contract.
 def build_briefing_prompt(topic: str, questions: list[str], edition: str) -> str:
     numbered_questions = "\n".join(
         f"{index}. {question}" for index, question in enumerate(questions, start=1)
@@ -537,6 +545,8 @@ def unique_urls(urls: list[str]) -> list[str]:
     return deduped
 
 
+# Source URLs pass through one normalization path because model output, OpenAI
+# web-search output, and the UI all need slightly different cleanup rules.
 def wikipedia_article_title(url: str) -> tuple[str, str] | None:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -992,6 +1002,8 @@ def extract_web_search_sources(payload: dict[str, object], edition: str) -> list
     return sources
 
 
+# The reloader is a tiny supervisor process. It gives local edit/restart
+# behavior without introducing a separate development dependency.
 def iter_watched_files() -> list[Path]:
     watched_files: list[Path] = []
 
@@ -1092,6 +1104,8 @@ class RestartableHTTPServer(ThreadingHTTPServer):
         self.restart_requested = False
 
 
+# The HTTP layer is deliberately thin: the browser owns most UI state, while the
+# server validates config, proxies OpenAI requests, and serves the static app.
 class AppHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
