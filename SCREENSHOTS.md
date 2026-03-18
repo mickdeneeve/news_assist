@@ -2,12 +2,14 @@
 
 This page collects the interface screenshots by page and language.
 
-<details>
-<summary>Briefing Page (English)</summary>
+## Briefing Page (English)
 
-English briefing overview 1
+Lead view of the English briefing page.
 
 ![Briefing page in English, screenshot 1](screenshots/scr.be1.png)
+
+<details>
+<summary>More English briefing screenshots</summary>
 
 English briefing overview 2
 
@@ -43,12 +45,14 @@ English briefing overview 9
 
 </details>
 
-<details>
-<summary>Configuration Page (English)</summary>
+## Configuration Page (English)
 
-English configuration overview 1
+Lead view of the English configuration page.
 
 ![Configuration page in English, screenshot 1](screenshots/scr.ce1.png)
+
+<details>
+<summary>More English configuration screenshots</summary>
 
 English configuration overview 2
 
@@ -56,12 +60,14 @@ English configuration overview 2
 
 </details>
 
-<details>
-<summary>Briefing Page (Dutch)</summary>
+## Briefing Page (Dutch)
 
-Dutch briefing overview 1
+Lead view of the Dutch briefing page.
 
 ![Briefing page in Dutch, screenshot 1](screenshots/scr.bn1.png)
+
+<details>
+<summary>More Dutch briefing screenshots</summary>
 
 Dutch briefing overview 2
 
