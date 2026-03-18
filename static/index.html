@@ -737,6 +737,17 @@
       let currentResolvedArticleQuery = "";
       let hasLoadedConfig = false;
 
+      // ---------------------------------------------------------------------
+      // Edition, copy, and selection-mode helpers
+      //
+      // The page has to stay coherent across two coupled choices:
+      // 1. edition: International/Netherlands
+      // 2. language/copy: English/Dutch
+      //
+      // These helpers derive labels, empty states, and behavior text from the
+      // active edition so the UI and the sourcing rules move together.
+      // ---------------------------------------------------------------------
+
       // Edition drives both language and source-bias rules, so the frontend
       // normalizes through the edition key before it derives any UI copy.
       function normalizeLanguage(value) {
@@ -877,6 +888,18 @@
           return true;
         });
       }
+
+      // ---------------------------------------------------------------------
+      // Source and answer normalization
+      //
+      // The briefing payload can contain:
+      // - source URLs attached to answers
+      // - a larger pool of consulted sources from web search
+      // - older saved answers that still have URLs embedded in the answer text
+      //
+      // This section normalizes those inputs into the two source lists used by
+      // the UI: referenced sources and other consulted sources.
+      // ---------------------------------------------------------------------
 
       // Sources are rendered in two tiers: the URLs answers explicitly cite, and
       // the larger pool of URLs the web-search tool consulted in the background.
@@ -1052,6 +1075,18 @@
           .filter((item) => item.question && item.answer);
       }
 
+      // ---------------------------------------------------------------------
+      // Tab-local briefing snapshot state
+      //
+      // The briefing page deliberately persists its working state in
+      // sessionStorage so the user can move to /config and back without losing:
+      // - the topic
+      // - the generated answers
+      // - the sourced links
+      // - the selected passages
+      // - the drafted article
+      // ---------------------------------------------------------------------
+
       function defaultBriefingState() {
         return {
           edition: currentEdition,
@@ -1148,6 +1183,15 @@
         const match = items.find((item) => item.question === question);
         return match ? String(match.answer || "") : "";
       }
+
+      // ---------------------------------------------------------------------
+      // Highlight persistence and article-input construction
+      //
+      // Highlights are not stored as DOM fragments. They are stored as text
+      // offsets into each answer so they can survive re-renders, edition
+      // changes, and article assembly. The same stored ranges later determine
+      // which text becomes the "included excerpts" payload.
+      // ---------------------------------------------------------------------
 
       // Highlights are stored as text offsets rather than DOM nodes so they can
       // survive answer re-renders and still feed the article-drafting step.
@@ -1259,6 +1303,15 @@
       function hasEditionMismatch() {
         return briefingState.hasBriefing && normalizeEdition(briefingState.edition) !== currentEdition;
       }
+
+      // ---------------------------------------------------------------------
+      // Snapshot mismatch handling
+      //
+      // Changing edition on the config page does not automatically rewrite the
+      // visible briefing. Instead, the page treats the current output as a
+      // snapshot from another edition and lets the user decide whether to keep,
+      // translate, or rebuild it.
+      // ---------------------------------------------------------------------
 
       // An edition change does not silently rewrite the visible output. The old
       // briefing remains a snapshot until the user translates or rebuilds it.
@@ -1524,6 +1577,14 @@
         articleStatus.textContent = briefingState.articleStatus;
         articleDraft.textContent = briefingState.articleDraft || text("articleDraftPlaceholder");
       }
+
+      // ---------------------------------------------------------------------
+      // Rendering helpers
+      //
+      // Rendering is split into focused functions so the page can re-render only
+      // the affected parts after each state change: answers, source lists,
+      // selected excerpts, article draft, and config summary.
+      // ---------------------------------------------------------------------
 
       // The article prompt itself is edited on the config page, but the main UI
       // still surfaces the resolved prompt so drafting remains inspectable.
@@ -1817,6 +1878,19 @@
           true
         );
       }
+
+      // ---------------------------------------------------------------------
+      // Backend synchronization and rebuild flows
+      //
+      // The network actions on this page form a dependency chain:
+      // - load config
+      // - request a briefing
+      // - optionally translate or rebuild the snapshot
+      // - draft an article from the resulting included excerpts
+      //
+      // The comments in this section focus on that state flow rather than on the
+      // mechanics of fetch itself.
+      // ---------------------------------------------------------------------
 
       // Config loads localize the UI immediately, but existing generated output
       // stays as a snapshot until the user takes an explicit mismatch action.

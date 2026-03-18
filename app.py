@@ -132,6 +132,15 @@ BACKEND_TEXT = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Edition, localization, and copy helpers
+#
+# In this app, "edition" is the central setting. It is broader than language:
+# it picks the UI/output language and the source preference policy together.
+# These helpers normalize both the newer edition-based config and the older
+# language-only config onto one internal representation.
+# ---------------------------------------------------------------------------
+
 # Editions bundle three concerns together: UI language, output language, and
 # source-bias rules. Normalizing through the edition key keeps those aligned
 # even when older config payloads still send only a language value.
@@ -187,6 +196,14 @@ def backend_text(language: str, key: str, **kwargs: object) -> str:
     template = BACKEND_TEXT[normalize_language(language)].get(key, key)
     return template.format(**kwargs)
 
+
+# ---------------------------------------------------------------------------
+# Local environment-file helpers
+#
+# The project uses a tiny handwritten .env reader/writer rather than an extra
+# dependency. That keeps the local setup simple and lets the config page update
+# a few known keys while still leaving the file readable and editable by hand.
+# ---------------------------------------------------------------------------
 
 # Keep .env handling intentionally small and predictable so users can edit it by
 # hand without adding a dependency just for local configuration.
@@ -269,6 +286,15 @@ def current_model() -> str:
 def current_port() -> str:
     return os.environ.get("PORT", DEFAULT_PORT).strip() or DEFAULT_PORT
 
+
+# ---------------------------------------------------------------------------
+# Reporting-config helpers
+#
+# journalism_config.json stores the app-level reporting settings that the user
+# changes on the configuration page: edition, reporting questions, article
+# prompt, target word count, and highlight mode. These helpers validate partial
+# or stale config files back into a complete, safe runtime shape.
+# ---------------------------------------------------------------------------
 
 def default_reporting_config() -> dict[str, object]:
     edition = DEFAULT_EDITION
@@ -430,6 +456,18 @@ def extract_output_text(payload: dict[str, object]) -> str:
     return "\n\n".join(pieces).strip()
 
 
+# ---------------------------------------------------------------------------
+# OpenAI metadata and prompt/response helpers
+#
+# The code below does two related jobs:
+# 1. ask OpenAI for a tightly constrained output shape
+# 2. normalize the real response back into that shape when the model is close,
+#    but not perfectly strict
+#
+# Keeping prompt construction and parsing adjacent makes that contract easier to
+# understand and maintain.
+# ---------------------------------------------------------------------------
+
 def fetch_available_models(language: str) -> tuple[list[str], str | None]:
     current = current_model()
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -544,6 +582,15 @@ def unique_urls(urls: list[str]) -> list[str]:
 
     return deduped
 
+
+# ---------------------------------------------------------------------------
+# Source URL normalization
+#
+# Source URLs can arrive from three places with slightly different quality:
+# model output, OpenAI web-search output, and older saved browser state. This
+# section normalizes them into one canonical form, including Wikipedia-language
+# rewriting for the Netherlands edition.
+# ---------------------------------------------------------------------------
 
 # Source URLs pass through one normalization path because model output, OpenAI
 # web-search output, and the UI all need slightly different cleanup rules.
@@ -750,6 +797,14 @@ def parse_briefing_output(text: str, questions: list[str], edition: str) -> list
     return normalized_answers
 
 
+# ---------------------------------------------------------------------------
+# Snapshot/article payload normalization
+#
+# The frontend sends browser state back to the backend for translation and
+# article drafting. These helpers accept that state defensively, strip it down to
+# the fields the backend actually trusts, and discard partial or malformed items.
+# ---------------------------------------------------------------------------
+
 def normalize_article_excerpts(raw_excerpts: object) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     if not isinstance(raw_excerpts, list):
@@ -937,6 +992,15 @@ def parse_topic_translation_output(text: str, language: str) -> str:
     return translated
 
 
+# ---------------------------------------------------------------------------
+# Article drafting and consulted-source extraction
+#
+# Once the user has a set of included excerpts, article drafting is a much
+# simpler OpenAI call than briefing generation: no web-search tool, just a
+# constrained prompt plus the selected text. The consulted-source extraction
+# stays separate because the UI uses that trail for transparency.
+# ---------------------------------------------------------------------------
+
 def build_article_prompt(article_query: str, excerpts: list[dict[str, str]], edition: str) -> str:
     instruction = article_query.strip() or localized_article_query(edition)
     excerpt_block = "\n\n".join(
@@ -1001,6 +1065,14 @@ def extract_web_search_sources(payload: dict[str, object], edition: str) -> list
 
     return sources
 
+
+# ---------------------------------------------------------------------------
+# Development reloader
+#
+# Running `python3 app.py` starts a small supervisor process by default. That
+# supervisor watches Python files, restarts the child server when code changes,
+# and also cooperates with the app's explicit "re-initialize" action.
+# ---------------------------------------------------------------------------
 
 # The reloader is a tiny supervisor process. It gives local edit/restart
 # behavior without introducing a separate development dependency.
@@ -1094,6 +1166,14 @@ def run_with_reloader() -> None:
 load_dotenv(ENV_FILE)
 ensure_local_reporting_config()
 
+
+# ---------------------------------------------------------------------------
+# HTTP server and JSON API
+#
+# The backend keeps the HTTP layer intentionally thin. The browser owns most UI
+# state and interaction logic; the server mainly validates input, persists local
+# config, calls OpenAI, and serves the static app shell.
+# ---------------------------------------------------------------------------
 
 class RestartableHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
