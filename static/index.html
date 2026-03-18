@@ -913,6 +913,8 @@
           return referencedSources;
         }
 
+        // Citation numbers under each answer should only refer to URLs the
+        // answer explicitly cites, not every URL returned by web search.
         answerItems.forEach((item) => {
           if (!item || !Array.isArray(item.links)) {
             return;
@@ -935,6 +937,8 @@
         sourceItems = briefingState.sources,
         answerItems = briefingState.answers
       ) {
+        // Keep the broader search trail visible without polluting the numbering
+        // for the sources that are actually referenced by answers.
         const referencedUrls = new Set(
           buildReferencedSources(answerItems, sourceItems).map((source) => source.url)
         );
@@ -1193,6 +1197,9 @@
             let end = Number.isInteger(highlight.end) ? highlight.end : null;
             const text = typeof highlight.text === "string" ? highlight.text.trim() : "";
 
+            // Highlights are stored as text offsets, but when answers change a
+            // little across reloads we can often recover them by locating the
+            // saved text inside the current answer body.
             if (!(start >= 0 && end > start && end <= answerText.length)) {
               if (!text) {
                 continue;
@@ -1256,6 +1263,8 @@
           return;
         }
 
+        // The visible output is treated as a snapshot of an older edition until
+        // the user explicitly translates it or rebuilds it.
         const snapshotEdition = editionLabelFor(briefingState.edition);
         const currentEditionLabel = editionLabelFor(currentEdition);
         const renderedLanguage = languageLabelFor(briefingState.snapshotLanguage);
@@ -1297,6 +1306,8 @@
 
         let cursor = 0;
 
+        // Rebuild the paragraph from plain text plus stored offset ranges so
+        // highlight persistence is independent from the current DOM structure.
         for (const highlight of questionHighlights) {
           if (highlight.start > cursor) {
             fragment.append(answerText.slice(cursor, highlight.start));
@@ -1656,6 +1667,8 @@
           return null;
         }
 
+        // Store highlights against the raw answer text for one card only, so
+        // the selection remains stable even after the answer is re-rendered.
         let start = textOffsetWithin(startText, range.startContainer, range.startOffset);
         let end = textOffsetWithin(startText, range.endContainer, range.endOffset);
         const rawText = range.toString();
@@ -1711,6 +1724,8 @@
       function buildArticleExcerpts() {
         const excerptByQuestion = new Map();
 
+        // Both modes ultimately produce the same "included excerpts" payload:
+        // include mode keeps only highlights, exclude mode keeps everything else.
         if (briefingState.selectionMode === "include") {
           briefingState.answers.forEach((answerItem) => {
             const includedText = briefingState.highlights
@@ -1809,6 +1824,8 @@
           const nextSelectionMode = normalizeSelectionMode(payload.article_selection_mode);
           const selectionModeChanged = briefingState.selectionMode !== nextSelectionMode;
           const nextState = { selectionMode: nextSelectionMode };
+          // An existing briefing stays as a snapshot when the edition changes;
+          // only selection-mode changes are applied destructively in place.
           if (!briefingState.hasBriefing) {
             nextState.edition = currentEdition;
             nextState.snapshotLanguage = currentLanguage;
@@ -1859,6 +1876,8 @@
         renderAnswers(normalizeAnswerItems([workingAnswerItem()]));
         renderSources([], text("sourcesAfterBriefing"), []);
         renderHighlightNote();
+        // Highlights and the drafted article are derived from the current answer
+        // text, so a fresh briefing invalidates both immediately.
         updateBriefingState({
           highlights: [],
           articleStatus: defaultArticleStatus(briefingState.selectionMode),

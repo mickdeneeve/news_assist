@@ -238,6 +238,8 @@ def write_env_file(path: Path, updates: dict[str, str]) -> None:
     settings.setdefault("OPENAI_MODEL", DEFAULT_MODEL)
     settings.setdefault("PORT", DEFAULT_PORT)
 
+    # Rewrite the file from normalized settings so config edits do not leave
+    # duplicate or out-of-order keys behind.
     lines = ["# Local app configuration"]
     written_keys: set[str] = set()
 
@@ -336,6 +338,8 @@ def read_reporting_config(path: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         return default_reporting_config()
 
+    # Treat partial or legacy config files as recoverable and fill the gaps
+    # from the current edition defaults so the UI can still boot cleanly.
     edition = normalize_edition(payload.get("edition", payload.get("language")))
     language = edition_language(edition)
     questions = normalize_questions(payload.get("questions"))
@@ -559,6 +563,8 @@ def resolve_wikipedia_language_variant(url: str, target_language: str | None) ->
         return url
 
     cache_key = (url, normalized_language)
+    # Cache both hits and misses so repeated briefings do not keep querying the
+    # Wikimedia API for the same article/language pair.
     if cache_key in WIKIPEDIA_LINK_CACHE:
         return WIKIPEDIA_LINK_CACHE[cache_key]
 
@@ -660,6 +666,8 @@ def split_answer_links(answer: str) -> tuple[str, list[str]]:
     trailing_urls: list[str] = []
     end_index = len(lines)
 
+    # Older model outputs sometimes append a trailing Links/Sources block even
+    # though the schema asks for URLs in the separate links array.
     while end_index > 0:
         line = lines[end_index - 1].strip()
         if not line:
@@ -695,6 +703,8 @@ def parse_briefing_output(text: str, questions: list[str], edition: str) -> list
             line for line in candidate.splitlines() if not line.strip().startswith("```")
         ).strip()
 
+    # The model occasionally wraps the JSON payload in extra prose; trim back to
+    # the outermost object before parsing so the request is still salvageable.
     start = candidate.find("{")
     end = candidate.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -950,6 +960,8 @@ def extract_web_search_sources(payload: dict[str, object], edition: str) -> list
     seen_urls: set[str] = set()
     sources: list[dict[str, str]] = []
 
+    # Keep the full consulted-source trail from web search; the frontend later
+    # splits this into referenced sources and additional background material.
     for item in payload.get("output", []):
         if not isinstance(item, dict) or item.get("type") != "web_search_call":
             continue
@@ -1042,6 +1054,8 @@ def run_with_reloader() -> None:
                     snapshot = take_watch_snapshot()
                     continue
 
+                # After an unexpected exit, wait for a code change instead of
+                # tight-loop restarting a broken process.
                 print(
                     f"Server exited with code {process.returncode}. Waiting for a Python file change before restart.",
                     flush=True,
