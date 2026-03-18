@@ -4,6 +4,12 @@ News Assist is a local journalism briefing tool with a Python backend and browse
 
 The repository does not include a real OpenAI API key. Use your own local `.env` file.
 
+## Preview
+
+![Briefing page preview](screenshots/scr.be1.png)
+
+See [all screenshots](SCREENSHOTS.md).
+
 ## Setup
 
 1. Copy `.env.example` to `.env`.
