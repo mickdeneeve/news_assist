@@ -23,3 +23,5 @@ See [all screenshots](SCREENSHOTS.md).
 
 - `.env` is ignored by git and should not be committed.
 - If port `8000` is already in use, change `PORT` in `.env`.
+
+- by Mick de Neeve (codex-assisted, March 2026)
