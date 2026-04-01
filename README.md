@@ -25,4 +25,4 @@ See [all screenshots](SCREENSHOTS.md).
 - If a stale local News Assist server from this checkout is still holding the configured port, rerunning `python3 app.py` asks it to stop and then continues startup.
 - If some other program owns the port, inspect it manually; see [RUNBOOK.md](RUNBOOK.md).
 
-\- by Mick de Neeve (codex-assisted, March 2026)
+\- by Mick de Neeve (codex-assisted, 2026)
