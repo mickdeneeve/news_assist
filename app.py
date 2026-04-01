@@ -16,9 +16,12 @@ browser can render and store safely.
 
 from __future__ import annotations
 
+import errno
+import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -39,13 +42,22 @@ OPENAI_MODELS_API_URL = "https://api.openai.com/v1/models"
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_PORT = "8000"
 SERVER_INSTANCE_ID = f"{os.getpid()}-{time.time_ns()}"
+APP_NAME = "news-assist"
 APP_USER_AGENT = "news-assist/1.0 (local journalism research tool)"
+APP_INSTALLATION_ID = hashlib.sha256(str(ROOT_DIR.resolve()).encode("utf-8")).hexdigest()
+LOCAL_SERVER_HOST = "127.0.0.1"
+LOCAL_SERVER_REQUEST_TIMEOUT_SECONDS = 1.5
+LOCAL_SERVER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+LOCAL_SERVER_SHUTDOWN_POLL_INTERVAL_SECONDS = 0.1
+TAKEOVER_REQUEST_HEADER = "X-News-Assist-Installation"
 CONFIG_KEYS = ("OPENAI_API_KEY", "OPENAI_MODEL", "PORT")
 RELOAD_ENV_VAR = "NEWS_ASSIST_RUN_SERVER"
 DISABLE_RELOAD_ENV_VAR = "NEWS_ASSIST_DISABLE_RELOAD"
 WATCHED_SUFFIXES = {".py"}
 IGNORED_DIRS = {".git", "__pycache__"}
 RESTART_EXIT_CODE = 75
+TAKEOVER_EXIT_CODE = 76
+PORT_IN_USE_EXIT_CODE = 78
 DEFAULT_EDITION = "international_en"
 EDITION_PROFILES = {
     "international_en": {
@@ -1117,6 +1129,119 @@ def take_watch_snapshot() -> dict[str, int]:
     }
 
 
+# Startup handover keeps `python3 app.py` as the only command a human needs.
+# If the configured port is already held by this same checkout, a fresh launch
+# asks the older instance to stop cleanly and then takes over the port.
+def local_api_url(port: int, path: str) -> str:
+    return f"http://{LOCAL_SERVER_HOST}:{port}{path}"
+
+
+def is_local_port_open(port: int) -> bool:
+    try:
+        with socket.create_connection((LOCAL_SERVER_HOST, port), timeout=LOCAL_SERVER_REQUEST_TIMEOUT_SECONDS):
+            return True
+    except OSError:
+        return False
+
+
+def fetch_local_app_metadata(port: int) -> dict[str, object] | None:
+    request = Request(
+        local_api_url(port, "/api/hello"),
+        method="GET",
+        headers={"User-Agent": APP_USER_AGENT},
+    )
+
+    try:
+        with urlopen(request, timeout=LOCAL_SERVER_REQUEST_TIMEOUT_SECONDS) as response:
+            status_code = response.getcode()
+            payload = json.loads(response.read())
+    except (HTTPError, URLError, json.JSONDecodeError, TimeoutError, OSError):
+        return None
+
+    if status_code != 200 or not isinstance(payload, dict):
+        return None
+
+    if str(payload.get("app", "")).strip() != APP_NAME:
+        return None
+
+    return payload
+
+
+def request_local_takeover(port: int) -> bool:
+    request = Request(
+        local_api_url(port, "/api/takeover"),
+        data=b"",
+        method="POST",
+        headers={
+            "User-Agent": APP_USER_AGENT,
+            TAKEOVER_REQUEST_HEADER: APP_INSTALLATION_ID,
+        },
+    )
+
+    try:
+        with urlopen(request, timeout=LOCAL_SERVER_REQUEST_TIMEOUT_SECONDS) as response:
+            status_code = response.getcode()
+            payload = json.loads(response.read())
+    except (HTTPError, URLError, json.JSONDecodeError, TimeoutError, OSError):
+        return False
+
+    if status_code != 202 or not isinstance(payload, dict):
+        return False
+
+    return str(payload.get("installation_id", "")).strip() == APP_INSTALLATION_ID
+
+
+def wait_for_local_port_release(port: int) -> bool:
+    deadline = time.monotonic() + LOCAL_SERVER_SHUTDOWN_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if not is_local_port_open(port):
+            return True
+        time.sleep(LOCAL_SERVER_SHUTDOWN_POLL_INTERVAL_SECONDS)
+
+    return not is_local_port_open(port)
+
+
+def take_over_running_instance_if_needed() -> None:
+    port = int(current_port())
+    if not is_local_port_open(port):
+        return
+
+    running_instance = fetch_local_app_metadata(port)
+    if running_instance is None:
+        print(
+            f"Port {port} is already in use by another local program. "
+            "News Assist will not take it over automatically. See RUNBOOK.md for manual diagnostics.",
+            flush=True,
+        )
+        raise SystemExit(PORT_IN_USE_EXIT_CODE)
+
+    installation_id = str(running_instance.get("installation_id", "")).strip()
+    if installation_id != APP_INSTALLATION_ID:
+        print(
+            f"Port {port} is already in use by another News Assist checkout. "
+            "This launch will not take it over automatically.",
+            flush=True,
+        )
+        raise SystemExit(PORT_IN_USE_EXIT_CODE)
+
+    instance_id = str(running_instance.get("instance_id", "")).strip() or "unknown"
+    print(
+        f"Found News Assist instance {instance_id} on http://{LOCAL_SERVER_HOST}:{port}/. "
+        "Asking it to stop so this launch can take over.",
+        flush=True,
+    )
+
+    if not request_local_takeover(port):
+        print("The existing News Assist instance did not accept the takeover request.", flush=True)
+        raise SystemExit(PORT_IN_USE_EXIT_CODE)
+
+    if not wait_for_local_port_release(port):
+        print("The existing News Assist instance did not release the port in time.", flush=True)
+        raise SystemExit(PORT_IN_USE_EXIT_CODE)
+
+    print("Previous News Assist instance stopped. Continuing startup.", flush=True)
+
+
 def start_server_process() -> subprocess.Popen:
     env = os.environ.copy()
     env[RELOAD_ENV_VAR] = "1"
@@ -1153,6 +1278,14 @@ def run_with_reloader() -> None:
                     waiting_for_change = False
                     snapshot = take_watch_snapshot()
                     continue
+
+                if process.returncode == TAKEOVER_EXIT_CODE:
+                    print("A new `python3 app.py` launch has taken over this server. Stopping this supervisor.", flush=True)
+                    return
+
+                if process.returncode == PORT_IN_USE_EXIT_CODE:
+                    print("Server startup stopped because the configured port is not available.", flush=True)
+                    return
 
                 # After an unexpected exit, wait for a code change instead of
                 # tight-loop restarting a broken process.
@@ -1200,6 +1333,7 @@ class RestartableHTTPServer(ThreadingHTTPServer):
         # The config page can ask the app to restart itself. This flag lets the
         # request handler communicate that intent back to the outer serve loop.
         self.restart_requested = False
+        self.shutdown_exit_code = 0
 
 
 # The HTTP layer is deliberately thin: the browser owns most UI state, while the
@@ -1223,6 +1357,8 @@ class AppHandler(SimpleHTTPRequestHandler):
             self._send_json(
                 200,
                 {
+                    "app": APP_NAME,
+                    "installation_id": APP_INSTALLATION_ID,
                     "message": backend_text(language, "hello_message"),
                     "model": current_model(),
                     "instance_id": SERVER_INSTANCE_ID,
@@ -1262,6 +1398,10 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         if route == "/api/config":
             self._handle_config_update()
+            return
+
+        if route == "/api/takeover":
+            self._handle_takeover_request()
             return
 
         if route == "/api/restart":
@@ -1667,6 +1807,27 @@ class AppHandler(SimpleHTTPRequestHandler):
 
         threading.Thread(target=self._shutdown_server_after_response, daemon=True).start()
 
+    # Startup takeover uses this internal route so a fresh `python3 app.py`
+    # launch can ask an older matching instance from the same checkout to stop.
+    def _handle_takeover_request(self) -> None:
+        if self.headers.get(TAKEOVER_REQUEST_HEADER, "").strip() != APP_INSTALLATION_ID:
+            self._send_json(403, {"error": "Takeover denied."})
+            return
+
+        self._send_json(
+            202,
+            {
+                "message": "Takeover started.",
+                "instance_id": SERVER_INSTANCE_ID,
+                "installation_id": APP_INSTALLATION_ID,
+            },
+        )
+
+        if hasattr(self.server, "shutdown_exit_code"):
+            self.server.shutdown_exit_code = TAKEOVER_EXIT_CODE
+
+        threading.Thread(target=self._shutdown_server_after_response, daemon=True).start()
+
     def _shutdown_server_after_response(self) -> None:
         time.sleep(0.2)
         self.server.shutdown()
@@ -1741,8 +1902,20 @@ class AppHandler(SimpleHTTPRequestHandler):
 # this process is the long-lived parent supervisor or the child server instance.
 def serve() -> None:
     port = int(current_port())
-    server = RestartableHTTPServer(("127.0.0.1", port), AppHandler)
-    print(f"Serving on http://127.0.0.1:{port}")
+
+    try:
+        server = RestartableHTTPServer((LOCAL_SERVER_HOST, port), AppHandler)
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            print(
+                f"Port {port} is already in use. News Assist could not claim it automatically. "
+                "See RUNBOOK.md for manual diagnostics.",
+                flush=True,
+            )
+            raise SystemExit(PORT_IN_USE_EXIT_CODE)
+        raise
+
+    print(f"Serving on http://{LOCAL_SERVER_HOST}:{port}")
 
     try:
         server.serve_forever()
@@ -1755,11 +1928,17 @@ def serve() -> None:
 
         os.execve(sys.executable, [sys.executable, str(ROOT_DIR / "app.py")], os.environ.copy())
 
+    if server.shutdown_exit_code:
+        raise SystemExit(server.shutdown_exit_code)
+
 
 # main() chooses between two modes:
 # - child server mode: serve requests directly
 # - parent supervisor mode: watch Python files and restart the child on changes
 def main() -> None:
+    if os.environ.get(RELOAD_ENV_VAR) != "1":
+        take_over_running_instance_if_needed()
+
     if os.environ.get(RELOAD_ENV_VAR) == "1" or os.environ.get(DISABLE_RELOAD_ENV_VAR) == "1":
         serve()
         return

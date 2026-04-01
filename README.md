@@ -22,6 +22,7 @@ See [all screenshots](SCREENSHOTS.md).
 ## Notes
 
 - `.env` is ignored by git and should not be committed.
-- If port `8000` is already in use, change `PORT` in `.env`.
+- If a stale local News Assist server from this checkout is still holding the configured port, rerunning `python3 app.py` asks it to stop and then continues startup.
+- If some other program owns the port, inspect it manually; see [RUNBOOK.md](RUNBOOK.md).
 
 \- by Mick de Neeve (codex-assisted, March 2026)
